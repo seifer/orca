@@ -2533,7 +2533,7 @@
         "jiraSortAscending": "ascending",
         "jiraSortDescending": "descending",
         "jiraColumnsPicker": "Columns",
-        "jiraColumnParent": "Epic / Parent",
+        "jiraColumnParent": "Parent",
         "jiraColumnSprint": "Sprint",
         "jiraColumnStoryPoints": "Points",
         "jiraColumnOriginalEstimate": "Estimate",
