@@ -1,12 +1,16 @@
-import type { ChildProcess } from 'node:child_process'
 import type { AiVaultServiceClientOptions } from './session-scanner-service-client-state'
+
+type RootAnswerChild = Pick<
+  ReturnType<AiVaultServiceClientOptions['processFactory']>,
+  'connected' | 'send'
+>
 
 /** The parent's half of `requestSessionSearchRoots`; a child replaced meanwhile gets no answer. */
 export function answerAiVaultServiceSessionSearchRoots(
-  child: ChildProcess | null,
+  child: RootAnswerChild | null,
   id: number,
   options: AiVaultServiceClientOptions,
-  currentChild: () => ChildProcess | null
+  currentChild: () => RootAnswerChild | null
 ): void {
   const resolve = options.resolveSessionSearchRoots
   void Promise.resolve()
