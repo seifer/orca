@@ -1,5 +1,6 @@
 import { AI_VAULT_AGENTS, type AiVaultAgent } from '../../shared/ai-vault-types'
 import type { AiVaultScanWork } from '../../shared/ai-vault-scan-progress'
+import { sessionFileExecutionNamespace } from './codex-session-root-dedup'
 
 type AgentTally = {
   files: Set<string>
@@ -27,9 +28,17 @@ export class AiVaultScanTally {
   }
 
   addFile(agent: AiVaultAgent, file: { path: string; dev?: number; ino?: number }): void {
-    // Why: Codex homes hard-link one rollout into several roots, and a linked
-    // Claude profile reaches the same folder twice; the user has one file.
-    this.agent(agent).files.add(file.ino ? `${file.dev}:${file.ino}` : file.path)
+    // Why: a hard link is one file within an execution namespace; WSL distros
+    // can reuse the same device and inode numbers for unrelated files.
+    const identity =
+      typeof file.dev === 'number' &&
+      typeof file.ino === 'number' &&
+      Number.isSafeInteger(file.dev) &&
+      Number.isSafeInteger(file.ino) &&
+      !(file.dev === 0 && file.ino === 0)
+        ? `${sessionFileExecutionNamespace(file.path)}:${file.dev}:${file.ino}`
+        : file.path
+    this.agent(agent).files.add(identity)
   }
 
   addDatabases(agent: AiVaultAgent, count: number): void {

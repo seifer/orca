@@ -3,7 +3,9 @@ import { act, cleanup, render, renderHook, screen } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AiVaultScanProgress } from '../../../../shared/ai-vault-scan-progress'
+import type { AiVaultListResult } from '../../../../shared/ai-vault-types'
 import { AiVaultScanProgressStrip } from './AiVaultScanProgressStrip'
+import { currentAiVaultScanIssueResult } from './ai-vault-scan-issue-state'
 import {
   resetAiVaultScanProgressStoreForTests,
   useAiVaultScanProgress
@@ -61,4 +63,22 @@ it('shows this computer’s scan only to a panel listing this computer', () => {
   expect(local.result.current).toBe(STOPPED)
   // A remote host has no progress stream yet; its panel keeps today's spinner and error line.
   expect(remote.result.current).toBeNull()
+})
+
+it('hides the old timeout while refreshing, then shows a newer ordinary failure', () => {
+  const oldIssue: AiVaultListResult = {
+    sessions: [],
+    issues: [],
+    scannedAt: new Date(1_000).toISOString()
+  }
+  const replacement: AiVaultScanProgress = {
+    ...STOPPED,
+    stage: 'finding',
+    startedAt: 2_000,
+    settledAt: null
+  }
+  expect(currentAiVaultScanIssueResult(oldIssue, replacement)).toBeNull()
+  expect(currentAiVaultScanIssueResult(oldIssue, { ...replacement, stage: 'finished' })).toBeNull()
+  expect(currentAiVaultScanIssueResult(oldIssue, null, true)).toBeNull()
+  expect(currentAiVaultScanIssueResult(oldIssue, null)).toBe(oldIssue)
 })

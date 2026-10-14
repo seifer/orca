@@ -7,13 +7,18 @@ import {
   localAiVaultScanProgress,
   onLocalAiVaultScanProgress,
   requestLocalAiVaultScan,
-  resetLocalAiVaultScanProgressForTests
+  resetLocalAiVaultScanProgressForTests,
+  startLocalAiVaultScanProgress
 } from './ai-vault-local-scan-progress'
+import { AiVaultScanTally } from './ai-vault-scan-tally'
 import { aiVaultScanWork, trackAiVaultScanProgress } from './ai-vault-scan-progress'
 import { scanAiVaultSessions } from './session-scanner'
 import { resetSessionParseCacheForTests } from './session-scanner-parse-cache'
 import { AiVaultScannerServiceClient } from './session-scanner-service-client'
-import { AI_VAULT_SERVICE_SCAN_TIMEOUT_MS } from './session-scanner-service-request-deadline'
+import {
+  AI_VAULT_SERVICE_SCAN_TIMEOUT_MS,
+  AiVaultServiceDeadlineError
+} from './session-scanner-service-request-deadline'
 import {
   AiVaultServiceTestChild,
   aiVaultServiceRequestId,
@@ -68,6 +73,7 @@ async function scanInChild(): Promise<{ reports: AiVaultScanWork[]; final: AiVau
 
 function startScan(): {
   child: AiVaultServiceTestChild
+  client: AiVaultScannerServiceClient
   scan: Promise<{ work: AiVaultScanWork | null }>
   published: (AiVaultScanProgress | null)[]
 } {
@@ -85,9 +91,9 @@ function startScan(): {
         undefined,
         listener
       ),
-    () => 5_000
+    { now: () => 5_000 }
   )
-  return { child, scan, published }
+  return { child, client, scan, published }
 }
 
 describe('Session History scan progress, scanner child to window', () => {
@@ -147,5 +153,63 @@ describe('Session History scan progress, scanner child to window', () => {
 
     expect(await settled).toBeInstanceOf(Error)
     expect(published.at(-1)).toMatchObject({ stage: 'stopped', agents: walking.agents })
+  })
+
+  it('replaces an old stop during preparation and clears it for a later ordinary failure', () => {
+    const old = startLocalAiVaultScanProgress(() => 1_000)
+    old.sent(1)
+    old.fail(new AiVaultServiceDeadlineError('scan timed out', 'scan', 1))
+    expect(localAiVaultScanProgress()?.stage).toBe('stopped')
+
+    const replacement = startLocalAiVaultScanProgress(() => 2_000)
+    old.fail(new Error('cancelled'))
+    expect(localAiVaultScanProgress()).toMatchObject({ stage: 'finding', startedAt: 2_000 })
+
+    replacement.fail(new Error('service unavailable'))
+    expect(localAiVaultScanProgress()).toBeNull()
+
+    const interrupted = startLocalAiVaultScanProgress(() => 3_000)
+    interrupted.sent(3)
+    interrupted.fail(new AiVaultServiceDeadlineError('another scan timed out', 'scan', 2))
+    expect(localAiVaultScanProgress()).toBeNull()
+  })
+
+  it('does not call a healthy scan stopped when the interactive lane expires', async () => {
+    vi.useFakeTimers()
+    const { child, client, scan } = startScan()
+    const rejectedScan = scan.catch((error: Error) => error)
+    const interactive = client.request({
+      type: 'request',
+      operation: 'subagents',
+      request: { agent: 'claude', parentFilePath: '/tmp/parent.jsonl' }
+    })
+    const rejectedInteractive = interactive.catch((error: Error) => error)
+    readyAiVaultServiceChild(child)
+    await vi.advanceTimersByTimeAsync(0)
+    child.emit('message', {
+      type: 'progress',
+      id: aiVaultServiceRequestId(child, 'scan'),
+      units: 1,
+      work: { stage: 'finding', agents: [], read: { done: 0, total: 0 } }
+    })
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    expect(await rejectedInteractive).toBeInstanceOf(AiVaultServiceDeadlineError)
+    expect(await rejectedScan).toBeInstanceOf(AiVaultServiceDeadlineError)
+    expect(localAiVaultScanProgress()).toBeNull()
+    client.dispose()
+  })
+
+  it('counts inode aliases within a namespace but keeps distinct WSL distros', () => {
+    const tally = new AiVaultScanTally()
+    for (const path of [
+      '\\\\wsl$\\Ubuntu\\home\\a\\one.jsonl',
+      '\\\\wsl.localhost\\ubuntu\\home\\a\\alias.jsonl',
+      '\\\\wsl$\\Debian\\home\\a\\other.jsonl',
+      'C:\\Users\\a\\native.jsonl'
+    ]) {
+      tally.addFile('codex', { path, dev: 1, ino: 100 })
+    }
+    expect(tally.snapshot().agents).toMatchObject([{ agent: 'codex', files: 3 }])
   })
 })

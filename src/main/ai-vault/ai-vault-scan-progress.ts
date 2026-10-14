@@ -6,16 +6,18 @@ import { AiVaultScanTally } from './ai-vault-scan-tally'
 // say when a scan's work advanced. Keyed by the request's cancel signal, which
 // every work site already receives, so the index loop or an interactive read
 // running through the same readers can never extend a scan's deadline.
-const reporters = new WeakMap<AbortSignal, { note: () => void; tally: AiVaultScanTally }>()
+const reporters = new WeakMap<
+  AbortSignal,
+  { note: () => void; workChanged: () => void; tally: AiVaultScanTally }
+>()
 
 // Rate-limited because a cold scan consumes thousands of chunks and stats, and
 // the parent only reads the counter as "still moving" inside a 130 s window.
 export const AI_VAULT_SCAN_PROGRESS_INTERVAL_MS = 1_000
 
 /**
- * Reports advancing work for the scan that owns `signal`, at most once per
- * interval and only when the counter moved, until the returned stop is called.
- * Each report carries what the scan has found and read so far.
+ * Reports this scan's work at most once per interval until stop is called.
+ * A trailing tally can keep the same units; only advancing units re-arm the deadline.
  */
 export function trackAiVaultScanProgress(
   signal: AbortSignal,
@@ -24,20 +26,49 @@ export function trackAiVaultScanProgress(
 ): () => void {
   let units = 0
   let lastReportedAt = Number.NEGATIVE_INFINITY
+  let trailing: ReturnType<typeof setTimeout> | null = null
   const tally = new AiVaultScanTally()
+  const publish = (): void => {
+    lastReportedAt = now()
+    report(units, tally.snapshot())
+  }
+  const workChanged = (): void => {
+    if (units === 0) {
+      return
+    }
+    if (trailing) {
+      return
+    }
+    const wait = Math.max(0, AI_VAULT_SCAN_PROGRESS_INTERVAL_MS - (now() - lastReportedAt))
+    if (wait === 0) {
+      publish()
+      return
+    }
+    trailing = setTimeout(() => {
+      trailing = null
+      publish()
+    }, wait)
+    trailing.unref?.()
+  }
   reporters.set(signal, {
     tally,
+    workChanged,
     note: () => {
       units++
-      const at = now()
-      if (at - lastReportedAt < AI_VAULT_SCAN_PROGRESS_INTERVAL_MS) {
+      if (now() - lastReportedAt < AI_VAULT_SCAN_PROGRESS_INTERVAL_MS) {
         return
       }
-      lastReportedAt = at
-      report(units, tally.snapshot())
+      if (trailing) {
+        clearTimeout(trailing)
+        trailing = null
+      }
+      publish()
     }
   })
   return () => {
+    if (trailing) {
+      clearTimeout(trailing)
+    }
     reporters.delete(signal)
   }
 }
@@ -63,7 +94,16 @@ export function openAiVaultScanSource(
   signal: AbortSignal | undefined,
   agent: AiVaultAgent
 ): () => void {
-  return tallyFor(signal)?.openSource(agent) ?? (() => undefined)
+  const reporter = signal ? reporters.get(signal) : undefined
+  if (!reporter) {
+    return () => undefined
+  }
+  const close = reporter.tally.openSource(agent)
+  reporter.workChanged()
+  return () => {
+    close()
+    reporter.workChanged()
+  }
 }
 
 export function noteAiVaultScanFileFound(
@@ -79,14 +119,27 @@ export function noteAiVaultScanDatabases(
   agent: AiVaultAgent,
   count: number
 ): void {
-  tallyFor(signal)?.addDatabases(agent, count)
+  const reporter = signal ? reporters.get(signal) : undefined
+  reporter?.tally.addDatabases(agent, count)
+  reporter?.workChanged()
 }
 
 /** Discovery is over: the scan now reads `total` more transcripts. */
 export function noteAiVaultScanReading(signal: AbortSignal | undefined, total: number): void {
-  tallyFor(signal)?.startReading(total)
+  const reporter = signal ? reporters.get(signal) : undefined
+  reporter?.tally.startReading(total)
+  reporter?.workChanged()
 }
 
 export function noteAiVaultScanFilesRead(signal: AbortSignal | undefined, count: number): void {
-  tallyFor(signal)?.addRead(count)
+  const reporter = signal ? reporters.get(signal) : undefined
+  reporter?.tally.addRead(count)
+  reporter?.workChanged()
+}
+
+/** Sends a trailing tally without advancing the scanner's no-progress deadline. */
+export function noteAiVaultScanWorkChanged(signal: AbortSignal | undefined): void {
+  if (signal) {
+    reporters.get(signal)?.workChanged()
+  }
 }

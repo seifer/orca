@@ -15,6 +15,7 @@ import { throwIfAiVaultScanCancelled } from './ai-vault-scan-cancellation'
 import {
   noteAiVaultScanFileFound,
   noteAiVaultScanProgress,
+  noteAiVaultScanWorkChanged,
   openAiVaultScanSource
 } from './ai-vault-scan-progress'
 
@@ -56,7 +57,6 @@ export async function discoverFiles(args: {
   function consume(observations: readonly SessionFileObservation[]): void {
     // A stat the cancel cut short is not an unreadable file; never record it.
     throwIfAiVaultScanCancelled(args.signal)
-    noteAiVaultScanProgress(args.signal)
     for (const observation of observations) {
       if ('issue' in observation) {
         recordSessionScanIssue(args.issues, {
@@ -90,6 +90,8 @@ export async function discoverFiles(args: {
         })
       }
     }
+    noteAiVaultScanProgress(args.signal)
+    noteAiVaultScanWorkChanged(args.signal)
   }
 
   async function finishPending(): Promise<void> {

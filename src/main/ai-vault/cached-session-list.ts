@@ -13,6 +13,10 @@ import { prepareOpenCodeWslReaders } from './opencode-wsl-runtime-preparation'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { AiVaultScanCoordinator } from './ai-vault-scan-coordinator'
 import {
+  startLocalAiVaultScanProgress,
+  type LocalAiVaultScanProgressHandle
+} from './ai-vault-local-scan-progress'
+import {
   aiVaultSessionDepthCovers,
   requestedAiVaultSessionDepth,
   truncateAiVaultListResult,
@@ -112,11 +116,20 @@ export async function listAiVaultSessions(
   // microtask, so an invalidation landing in that gap would otherwise be read
   // as having happened before this scan and leave the stale result cacheable.
   const startGeneration = cacheGeneration
+  let progress: LocalAiVaultScanProgressHandle | null = null
   return scanCoordinator.run({
     key: scanKey,
     force: args?.force,
     signal: options.signal,
+    onCreate: () => {
+      progress = startLocalAiVaultScanProgress()
+    },
+    onError: (error) => progress?.fail(error),
     start: async (scanSignal) => {
+      const scanProgress = progress
+      if (!scanProgress) {
+        throw new Error('Local scan progress was not created.')
+      }
       const result = await scanAiVaultSessionsInBackground(
         {
           includeAntigravityIdeSessions: args?.includeAntigravityIdeSessions,
@@ -125,7 +138,8 @@ export async function listAiVaultSessions(
           scopePaths: args?.scopePaths,
           ...(await localAiVaultScanRoots())
         },
-        scanSignal
+        scanSignal,
+        scanProgress
       )
       // A delete (or other invalidation) landed while this scan was running:
       // its result predates the delete, so caching it would resurrect the

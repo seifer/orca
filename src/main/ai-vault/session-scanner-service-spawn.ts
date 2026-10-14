@@ -29,7 +29,10 @@ import type {
   AiVaultServiceSubagentRequest,
   AiVaultSessionSearchInit
 } from './session-scanner-service-protocol'
-import { requestLocalAiVaultScan } from './ai-vault-local-scan-progress'
+import {
+  requestLocalAiVaultScan,
+  type LocalAiVaultScanProgressHandle
+} from './ai-vault-local-scan-progress'
 
 export function spawnAiVaultServiceProcess(): ChildProcess {
   const entryPath = getAiVaultServiceEntryPath()
@@ -64,15 +67,16 @@ function getSharedClient(): AiVaultScannerServiceClient {
 
 export function scanAiVaultSessionsInService(
   options: AiVaultServiceScanOptions,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  progress?: LocalAiVaultScanProgressHandle
 ): Promise<AiVaultListResult> {
   return withSpan('aiVault.scan.service', async (span) => {
-    const value = await requestLocalAiVaultScan((listener) =>
-      getSharedClient().request<Extract<AiVaultServiceResultValue, { operation: 'scan' }>['value']>(
-        { type: 'request', operation: 'scan', options },
-        signal,
-        listener
-      )
+    const value = await requestLocalAiVaultScan(
+      (listener) =>
+        getSharedClient().request<
+          Extract<AiVaultServiceResultValue, { operation: 'scan' }>['value']
+        >({ type: 'request', operation: 'scan', options }, signal, listener),
+      { progress }
     )
     span.setAttribute('serviceDurationMs', value.durationMs)
     span.setAttribute('sessions', value.result.sessions.length)

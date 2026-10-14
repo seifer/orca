@@ -27,6 +27,8 @@ export class AiVaultScanCoordinator {
     key: string
     force?: boolean
     signal?: AbortSignal
+    onCreate?: () => void
+    onError?: (error: unknown) => void
     start: (signal: AbortSignal) => Promise<AiVaultListResult>
   }): Promise<AiVaultListResult> {
     if (args.signal?.aborted) {
@@ -39,7 +41,13 @@ export class AiVaultScanCoordinator {
       entry = undefined
     }
     if (!entry) {
-      entry = this.createEntry(args.key, args.force === true, args.start)
+      entry = this.createEntry(
+        args.key,
+        args.force === true,
+        args.start,
+        args.onCreate,
+        args.onError
+      )
       this.entries.set(args.key, entry)
     }
     if (preempted) {
@@ -54,9 +62,12 @@ export class AiVaultScanCoordinator {
   private createEntry(
     key: string,
     force: boolean,
-    start: (signal: AbortSignal) => Promise<AiVaultListResult>
+    start: (signal: AbortSignal) => Promise<AiVaultListResult>,
+    onCreate?: () => void,
+    onError?: (error: unknown) => void
   ): ScanEntry {
     const controller = new AbortController()
+    onCreate?.()
     const entry: ScanEntry = {
       controller,
       force,
@@ -75,7 +86,10 @@ export class AiVaultScanCoordinator {
       entry.settled = true
       this.removeEntry(key, entry)
     }
-    void entry.promise.then(onSettled, onSettled)
+    void entry.promise.then(onSettled, (error) => {
+      onError?.(error)
+      onSettled()
+    })
     return entry
   }
 

@@ -41,6 +41,7 @@ import { useAiVaultSearchFocusRequest } from './use-ai-vault-search-focus-reques
 import { usePersistedAiVaultViewOptions } from './use-persisted-ai-vault-view-options'
 import { AgentSessionContinuationDialog } from '@/components/agent-session-continuation/AgentSessionContinuationDialog'
 import { AiVaultScanIssueBanners } from './AiVaultScanIssueBanners'
+import { currentAiVaultScanIssueResult } from './ai-vault-scan-issue-state'
 import { useAiVaultSessionDeleteAction } from './ai-vault-session-delete-action'
 import { useAiVaultPanelSearch } from './use-ai-vault-search'
 import { aiVaultSearchScopeIdentity } from './ai-vault-search-scope-identity'
@@ -48,6 +49,7 @@ import { AiVaultPanelSearch } from './AiVaultPanelSearch'
 import { useAiVaultPanelSessionResume } from './use-ai-vault-panel-session-resume'
 import { AiVaultScanProgressStrip } from './AiVaultScanProgressStrip'
 import { useAiVaultScanProgress } from './ai-vault-scan-progress-store'
+import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
 export default function AiVaultPanel(): React.JSX.Element {
   const activeWorktreeId = useActiveWorktreeId()
   const activeWorktree = useActiveWorktree()
@@ -273,7 +275,11 @@ export default function AiVaultPanel(): React.JSX.Element {
 
       {!searching && (
         <AiVaultScanIssueBanners
-          scanResult={scanResult}
+          scanResult={currentAiVaultScanIssueResult(
+            scanResult,
+            stripProgress,
+            loading && executionHostScope === LOCAL_EXECUTION_HOST_ID
+          )}
           localScanStopShown={stripProgress?.stage === 'stopped'}
         />
       )}

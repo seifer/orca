@@ -6,24 +6,16 @@ import {
 
 type Listener = (progress: AiVaultScanProgress | null) => void
 
-/** One scan request's progress, from the moment the scanner process receives it. */
-type LocalAiVaultScanProgressHandle = AiVaultServiceScanListener & {
+/** One local scan from coordinator creation through its service reply. */
+export type LocalAiVaultScanProgressHandle = AiVaultServiceScanListener & {
   finish: (work: AiVaultScanWork | null) => void
-  /** The no-progress deadline ended it. */
-  stop: () => void
-  /** Cancelled or failed for another reason: the last settled scan is what stands. */
-  abandon: () => void
+  fail: (error: unknown) => void
 }
 
 let latest: AiVaultScanProgress | null = null
-let lastSettled: AiVaultScanProgress | null = null
-let running: LocalAiVaultScanProgressHandle | null = null
-// Requests not yet settled, counted so a cancelled scan never flashes the old state
-// while the scan that replaced it waits for the scanner process.
-let unsettledRequests = 0
+let currentHandle: LocalAiVaultScanProgressHandle | null = null
 const listeners = new Set<Listener>()
 
-/** This computer's running scan, else the last one that finished or stopped. */
 export function localAiVaultScanProgress(): AiVaultScanProgress | null {
   return latest
 }
@@ -40,85 +32,72 @@ function publish(next: AiVaultScanProgress | null): void {
   }
 }
 
-/**
- * Scans run one at a time in the scanner process, so the last one it received
- * is the one running; a handle that is no longer that one publishes nothing.
- */
-function trackLocalAiVaultScanProgress(now: () => number): LocalAiVaultScanProgressHandle {
-  let current: AiVaultScanProgress | null = null
-  const settle = (next: AiVaultScanProgress): void => {
-    running = null
-    lastSettled = next
-    publish(next)
+/** A replacement owns the strip before asynchronous root preparation can yield. */
+export function startLocalAiVaultScanProgress(
+  now: () => number = Date.now
+): LocalAiVaultScanProgressHandle {
+  let serviceRequestId: number | null = null
+  let current: AiVaultScanProgress = {
+    stage: 'finding',
+    agents: [],
+    read: { done: 0, total: 0 },
+    startedAt: now(),
+    settledAt: null
   }
   const handle: LocalAiVaultScanProgressHandle = {
-    sent: () => {
-      running = handle
-      current = {
-        stage: 'finding',
-        agents: [],
-        read: { done: 0, total: 0 },
-        startedAt: now(),
-        settledAt: null
-      }
-      publish(current)
+    sent: (requestId) => {
+      serviceRequestId = requestId
     },
     work: (work) => {
-      if (running === handle && current) {
+      if (currentHandle === handle) {
         current = { ...current, ...work }
         publish(current)
       }
     },
     finish: (work) => {
-      if (running === handle && current) {
-        settle({ ...current, ...work, stage: 'finished', settledAt: now() })
+      if (currentHandle === handle) {
+        currentHandle = null
+        publish({ ...current, ...work, stage: 'finished', settledAt: now() })
       }
     },
-    stop: () => {
-      if (running === handle && current) {
-        settle({ ...current, stage: 'stopped', settledAt: now() })
-      }
-    },
-    abandon: () => {
-      if (running === handle) {
-        running = null
-      }
-      if (running === null && unsettledRequests === 0) {
-        publish(lastSettled)
+    fail: (error) => {
+      if (currentHandle === handle) {
+        currentHandle = null
+        if (
+          error instanceof AiVaultServiceDeadlineError &&
+          error.operation === 'scan' &&
+          error.requestId === serviceRequestId
+        ) {
+          publish({ ...current, stage: 'stopped', settledAt: now() })
+        } else {
+          publish(null)
+        }
       }
     }
   }
+  currentHandle = handle
+  publish(current)
   return handle
 }
 
-/** Runs one scan request through the scanner process, publishing its progress until it settles. */
+/** Runs the scanner service request using the coordinator's progress ownership. */
 export async function requestLocalAiVaultScan<T extends { work: AiVaultScanWork | null }>(
   request: (listener: AiVaultServiceScanListener) => Promise<T>,
-  now: () => number = Date.now
+  options: { now?: () => number; progress?: LocalAiVaultScanProgressHandle } = {}
 ): Promise<T> {
-  const progress = trackLocalAiVaultScanProgress(now)
-  let value: T
-  unsettledRequests++
+  const progress = options.progress ?? startLocalAiVaultScanProgress(options.now)
   try {
-    value = await request(progress)
+    const value = await request(progress)
+    progress.finish(value.work)
+    return value
   } catch (error) {
-    unsettledRequests--
-    if (error instanceof AiVaultServiceDeadlineError) {
-      progress.stop()
-    } else {
-      progress.abandon()
-    }
+    progress.fail(error)
     throw error
   }
-  unsettledRequests--
-  progress.finish(value.work)
-  return value
 }
 
 export function resetLocalAiVaultScanProgressForTests(): void {
   latest = null
-  lastSettled = null
-  running = null
-  unsettledRequests = 0
+  currentHandle = null
   listeners.clear()
 }
