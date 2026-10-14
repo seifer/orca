@@ -18,6 +18,7 @@ import {
   waitFor
 } from './acp-structured-adapter.test-support'
 import { GrokFixtureReplay } from './acp-structured-fixture-replay.test-support'
+import { deferred } from './acp-scripted-agent.test-support'
 import { resolveAcpLaunchInvocation } from './acp-structured-launch-resolution'
 import { readAcpFixture, type AcpFixtureFrame } from './acp-timeline-fixture.test-support'
 
@@ -101,4 +102,23 @@ it('launches on its own private folder with file sign-in and no other Google cre
     expect(process.platform === 'win32' || (mode & 0o777) === 0o700).toBe(true)
   }
   await rm(stateDirectory, { recursive: true, force: true })
+})
+
+it('refuses a new start while its sign-in changes, and stops one already starting', async () => {
+  const gate = ANTIGRAVITY.launchGate!
+  const rig = await openAcpAdapterRig({
+    spec: ANTIGRAVITY,
+    script: (agent) => agent.on('session/new', () => {})
+  })
+  const starting = rig.acquire().catch((error: unknown) => error)
+  await rig.frame('session/new')
+  const signIn = deferred<void>()
+  const operation = gate.run(
+    async () => {},
+    () => signIn.promise
+  )
+  expect(String(await starting)).toContain('closed while starting')
+  await expect(rig.acquire()).rejects.toMatchObject({ reason: 'accountSwitchInProgress' })
+  signIn.resolve()
+  await operation
 })
