@@ -12,6 +12,7 @@ import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
 import type { SmartGitHubPrStartPointSelection } from './source-selection-decisions'
+import type { WorkspaceCreationTargetHint } from '@/lib/project-host-workspace-target'
 
 export type ComposerDecisions = {
   canResolveFolderSmartGitHubSubmit: (input: { hasFolderSourceRepos: boolean }) => boolean
@@ -35,15 +36,7 @@ export type ComposerDecisions = {
     lastAutoName: string
     lookupTextIsQuery?: boolean
   }) => boolean
-  resolveInitialWorkspaceRunSeed: (input: {
-    draftProjectId?: string | null
-    draftHostId?: string | null
-    draftProjectHostSetupId?: string | null
-    initialTaskSourceContext?: Pick<
-      TaskSourceContext,
-      'projectId' | 'hostId' | 'projectHostSetupId'
-    > | null
-  }) => {
+  resolveInitialWorkspaceRunSeed: (input: InitialWorkspaceRunSeedInput) => {
     projectId: string | null
     hostId: ExecutionHostId | null
     projectHostSetupId: string | null
@@ -129,6 +122,7 @@ export type InitialWorkspaceRunSeedInput = {
   draftProjectId?: string | null
   draftHostId?: string | null
   draftProjectHostSetupId?: string | null
+  initialWorkspaceTarget?: WorkspaceCreationTargetHint | null
   initialTaskSourceContext?: Pick<
     TaskSourceContext,
     'projectId' | 'hostId' | 'projectHostSetupId'
@@ -139,17 +133,19 @@ export function resolveInitialWorkspaceRunSeed({
   draftProjectId,
   draftHostId,
   draftProjectHostSetupId,
+  initialWorkspaceTarget,
   initialTaskSourceContext
 }: InitialWorkspaceRunSeedInput): {
   projectId: string | null
   hostId: ExecutionHostId | null
   projectHostSetupId: string | null
 } {
+  // Why: the linked provider account can belong to a different project or host than creation.
+  const initialRunTarget = initialWorkspaceTarget ?? initialTaskSourceContext
   return {
-    projectId: draftProjectId ?? initialTaskSourceContext?.projectId ?? null,
-    hostId: normalizeExecutionHostId(draftHostId ?? initialTaskSourceContext?.hostId),
-    projectHostSetupId:
-      draftProjectHostSetupId ?? initialTaskSourceContext?.projectHostSetupId ?? null
+    projectId: draftProjectId ?? initialRunTarget?.projectId ?? null,
+    hostId: normalizeExecutionHostId(draftHostId ?? initialRunTarget?.hostId),
+    projectHostSetupId: draftProjectHostSetupId ?? initialRunTarget?.projectHostSetupId ?? null
   }
 }
 
