@@ -22,6 +22,9 @@ import { isRuntimeProviderSearchQueryWithinLimit } from './runtime-provider-sear
 import { readRuntimeJiraPayload } from './runtime-jira-payload-stream'
 import { getJiraRuntimeTarget, type RuntimeJiraSettings } from './runtime-jira-target'
 import { parseJiraConnectionStatus } from './runtime-jira-connection-status'
+import { jiraListPrioritiesForTarget } from './runtime-jira-priority-client'
+
+export { jiraListPrioritiesForTarget } from './runtime-jira-priority-client'
 
 export { jiraLookupIssueSummary, jiraReadStatus } from './runtime-jira-summary-client'
 export {
@@ -247,15 +250,7 @@ export async function jiraListPriorities(
   settings: RuntimeJiraSettings,
   siteId?: string | null
 ): Promise<JiraPriority[]> {
-  const target = getJiraRuntimeTarget(settings)
-  return target.kind === 'environment'
-    ? callRuntimeRpc<JiraPriority[]>(
-        target,
-        'jira.listPriorities',
-        siteId ? { siteId } : undefined,
-        { timeoutMs: 30_000 }
-      )
-    : window.api.jira.listPriorities(siteId ? { siteId } : undefined)
+  return jiraListPrioritiesForTarget(getJiraRuntimeTarget(settings), siteId)
 }
 
 /** Lists users assignable to an existing issue, via the active runtime. */
