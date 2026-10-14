@@ -2,6 +2,7 @@ import type {
   JiraConnectArgs,
   JiraCreateIssueArgs,
   JiraIssueFilter,
+  JiraIssueListFilters,
   JiraIssueUpdate,
   JiraSiteSelection
 } from '../../shared/jira-types'
@@ -65,9 +66,10 @@ export class RuntimeJiraCommands {
     filter?: JiraIssueFilter,
     limit = 30,
     siteId?: JiraSiteSelection,
-    strict = false
+    strict = false,
+    filters?: JiraIssueListFilters
   ): ReturnType<typeof listIssues> {
-    return listIssues(filter, Math.min(Math.max(1, limit), 100), siteId, strict)
+    return listIssues(filter, Math.min(Math.max(1, limit), 100), siteId, strict, filters)
   }
 
   jiraCreateIssue(args: JiraCreateIssueArgs): ReturnType<typeof createIssue> {

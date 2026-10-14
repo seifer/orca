@@ -139,6 +139,8 @@ export type JiraIssueUpdate = {
 
 export type JiraIssueFilter = 'assigned' | 'reported' | 'all' | 'done'
 
+export type JiraIssueListFilters = { statuses?: string[] }
+
 export type JiraConnectArgs = {
   siteUrl: string
   // Ignored for 'server' auth: self-hosted PATs authenticate via Bearer

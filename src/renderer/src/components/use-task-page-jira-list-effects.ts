@@ -1,3 +1,4 @@
+import { buildJiraStatusCatalog } from './task-page-jira-status-catalog'
 import type { TaskPageLinearCollectionEffectsModel } from './use-task-page-linear-collection-effects'
 import { useEffect, useRef } from 'react'
 import {
@@ -39,6 +40,9 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     jiraActiveSavedFilterId,
     jiraSavedFilters,
     jiraSavedFiltersLoading,
+    selectedJiraStatuses,
+    jiraQuickFiltersLoading,
+    setJiraStatusCatalog,
     setJiraProjectStatusOrder,
     displayedJiraIssues
   } = model
@@ -71,7 +75,7 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     if (taskSource !== 'jira') {
       return
     }
-    if (!jiraConnected || jiraSavedFiltersLoading) {
+    if (!jiraConnected || jiraSavedFiltersLoading || jiraQuickFiltersLoading) {
       return
     }
     const force = previousJiraRefreshNonceRef.current !== jiraRefreshNonce
@@ -97,12 +101,19 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
           )
         : listJiraIssues(activeJiraPreset, JIRA_ITEM_LIMIT, {
             sourceContext: jiraTaskSourceContext,
-            force
+            force,
+            ...(selectedJiraStatuses.length ? { filters: { statuses: selectedJiraStatuses } } : {})
           }).then((issues) => ({ issues, jqlRejection: null }))
     void request
       .then(({ issues, jqlRejection }) => {
         if (cancelled) {
           return
+        }
+        if (!trimmed && selectedJiraStatuses.length === 0) {
+          setJiraStatusCatalog({
+            scopeKey: `${jiraTaskSourceScopeKey}::${selectedJiraSiteId}::${activeJiraPreset}`,
+            items: buildJiraStatusCatalog(issues)
+          })
         }
         setJiraIssues(issues)
         setJiraJqlRejection(jqlRejection)
@@ -151,6 +162,8 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     jiraActiveSavedFilterId,
     jiraSavedFilters,
     jiraSavedFiltersLoading,
+    selectedJiraStatuses,
+    jiraQuickFiltersLoading,
     taskResumeApplied,
     jiraTaskSourceContext,
     jiraTaskSourceScopeKey
