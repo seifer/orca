@@ -27,6 +27,7 @@ import { isRuntimeProviderSearchQueryWithinLimit } from './runtime-provider-sear
 import { readRuntimeJiraPayload } from './runtime-jira-payload-stream'
 import { getJiraRuntimeTarget, type RuntimeJiraSettings } from './runtime-jira-target'
 import { parseJiraConnectionStatus } from './runtime-jira-connection-status'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 
 export { jiraLookupIssueSummary, jiraReadStatus } from './runtime-jira-summary-client'
 export {
@@ -146,7 +147,16 @@ export async function jiraListIssues(
   siteId?: JiraSiteSelection | null,
   filters?: JiraIssueListFilters
 ): Promise<JiraIssue[]> {
-  const target = getJiraRuntimeTarget(settings)
+  return jiraListIssuesForTarget(getJiraRuntimeTarget(settings), filter, limit, siteId, filters)
+}
+
+export async function jiraListIssuesForTarget(
+  target: RuntimeClientTarget,
+  filter?: JiraIssueFilter,
+  limit?: number,
+  siteId?: JiraSiteSelection | null,
+  filters?: JiraIssueListFilters
+): Promise<JiraIssue[]> {
   const args = { filter, limit, siteId: siteId ?? undefined, ...(filters ? { filters } : {}) }
   if (target.kind === 'environment') {
     if (filters?.statuses?.length) {
