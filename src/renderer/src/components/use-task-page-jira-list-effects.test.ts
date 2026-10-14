@@ -34,6 +34,9 @@ function createModel(): TaskPageLinearCollectionEffectsModel {
     setAppliedJiraSearch: vi.fn(),
     activeJiraPreset: 'assigned',
     jiraRefreshNonce: 0,
+    jiraActiveSavedFilterId: null,
+    jiraSavedFilters: [],
+    jiraSavedFiltersLoading: false,
     setJiraProjectStatusOrder: vi.fn(),
     displayedJiraIssues: []
   }
