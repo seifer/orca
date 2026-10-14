@@ -50,6 +50,8 @@ describe('Windows CIM CPU time mapping', () => {
 })
 
 describe.skipIf(process.platform !== 'win32')('Windows process table read', () => {
+  // A watchdog, not a latency budget: this is often the runner's first Windows PowerShell 5.1
+  // start, which takes 10-19 s on packaged CI and has reached 48 s. Matches nsis-process-check.
   it('parses a command line whose characters the OEM code page maps to control bytes', () => {
     const marker = 'idle-cpu-oem • → ♪'
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)', marker], {
@@ -62,7 +64,7 @@ describe.skipIf(process.platform !== 'win32')('Windows process table read', () =
     } finally {
       child.kill()
     }
-  }, 30_000)
+  }, 75_000)
 })
 
 describe('idle CPU process sampling window', () => {
