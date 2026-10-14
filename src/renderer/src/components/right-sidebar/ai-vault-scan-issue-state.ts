@@ -1,21 +1,11 @@
 import type { AiVaultListResult, AiVaultScanIssue } from '../../../../shared/ai-vault-types'
-import type { AiVaultScanProgress } from '../../../../shared/ai-vault-scan-progress'
 
 /** Banners describe only the scan whose result is applied. */
 export function currentAiVaultScanIssueResult(
   result: AiVaultListResult | null,
-  progress: AiVaultScanProgress | null,
   localRefreshLoading = false
 ): AiVaultListResult | null {
   if (localRefreshLoading || !result) {
-    return null
-  }
-  if (
-    progress &&
-    (progress.stage === 'finding' ||
-      progress.stage === 'reading' ||
-      Date.parse(result.scannedAt) <= progress.startedAt)
-  ) {
     return null
   }
   return result

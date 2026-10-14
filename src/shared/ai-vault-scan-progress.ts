@@ -20,13 +20,20 @@ export type AiVaultScanWork = {
 }
 
 /**
- * This computer's latest Session History scan, as main pushes it to windows.
+ * One local Session History scan entry, as main pushes it to windows.
  * When `stopped`, the agents still `walking` are the ones the scan stopped on.
  */
 export type AiVaultScanProgress = Omit<AiVaultScanWork, 'stage'> & {
+  scanId: string
+  scanKey: string
   stage: AiVaultScanWork['stage'] | 'finished' | 'stopped'
   startedAt: number
   settledAt: number | null
+}
+
+export type AiVaultScanProgressUpdate = {
+  scanKey: string
+  progress: AiVaultScanProgress | null
 }
 
 export const AI_VAULT_SCAN_PROGRESS_CHANNEL = 'aiVault:scanProgress'

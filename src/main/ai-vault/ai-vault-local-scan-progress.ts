@@ -1,10 +1,14 @@
-import type { AiVaultScanProgress, AiVaultScanWork } from '../../shared/ai-vault-scan-progress'
+import type {
+  AiVaultScanProgress,
+  AiVaultScanProgressUpdate,
+  AiVaultScanWork
+} from '../../shared/ai-vault-scan-progress'
 import {
   AiVaultServiceDeadlineError,
   type AiVaultServiceScanListener
 } from './session-scanner-service-request-deadline'
 
-type Listener = (progress: AiVaultScanProgress | null) => void
+type Listener = (update: AiVaultScanProgressUpdate) => void
 
 /** One local scan from coordinator creation through its service reply. */
 export type LocalAiVaultScanProgressHandle = AiVaultServiceScanListener & {
@@ -12,12 +16,13 @@ export type LocalAiVaultScanProgressHandle = AiVaultServiceScanListener & {
   fail: (error: unknown) => void
 }
 
-let latest: AiVaultScanProgress | null = null
-let currentHandle: LocalAiVaultScanProgressHandle | null = null
+const MAX_PROGRESS_ENTRIES = 8
+const latest = new Map<string, AiVaultScanProgress>()
+const currentHandles = new Map<string, LocalAiVaultScanProgressHandle>()
 const listeners = new Set<Listener>()
 
-export function localAiVaultScanProgress(): AiVaultScanProgress | null {
-  return latest
+export function localAiVaultScanProgress(scanKey: string): AiVaultScanProgress | null {
+  return latest.get(scanKey) ?? null
 }
 
 export function onLocalAiVaultScanProgress(listener: Listener): () => void {
@@ -25,19 +30,36 @@ export function onLocalAiVaultScanProgress(listener: Listener): () => void {
   return () => listeners.delete(listener)
 }
 
-function publish(next: AiVaultScanProgress | null): void {
-  latest = next
+function publish(scanKey: string, next: AiVaultScanProgress | null): void {
+  latest.delete(scanKey)
+  if (next) {
+    latest.set(scanKey, next)
+  }
+  while (latest.size > MAX_PROGRESS_ENTRIES) {
+    const oldest = latest.keys().next().value
+    if (oldest === undefined) {
+      break
+    }
+    latest.delete(oldest)
+    for (const listener of listeners) {
+      listener({ scanKey: oldest, progress: null })
+    }
+  }
   for (const listener of listeners) {
-    listener(next)
+    listener({ scanKey, progress: next })
   }
 }
 
-/** A replacement owns the strip before asynchronous root preparation can yield. */
+/** A replacement clears its previous strip before roots preparation can yield. */
 export function startLocalAiVaultScanProgress(
+  scanKey: string,
+  scanId: string,
   now: () => number = Date.now
 ): LocalAiVaultScanProgressHandle {
   let serviceRequestId: number | null = null
   let current: AiVaultScanProgress = {
+    scanKey,
+    scanId,
     stage: 'finding',
     agents: [],
     read: { done: 0, total: 0 },
@@ -47,45 +69,55 @@ export function startLocalAiVaultScanProgress(
   const handle: LocalAiVaultScanProgressHandle = {
     sent: (requestId) => {
       serviceRequestId = requestId
+      if (currentHandles.get(scanKey) === handle) {
+        publish(scanKey, current)
+      }
     },
     work: (work) => {
-      if (currentHandle === handle) {
+      if (currentHandles.get(scanKey) === handle) {
         current = { ...current, ...work }
-        publish(current)
+        publish(scanKey, current)
       }
     },
     finish: (work) => {
-      if (currentHandle === handle) {
-        currentHandle = null
-        publish({ ...current, ...work, stage: 'finished', settledAt: now() })
+      if (currentHandles.get(scanKey) === handle) {
+        currentHandles.delete(scanKey)
+        publish(scanKey, { ...current, ...work, stage: 'finished', settledAt: now() })
       }
     },
     fail: (error) => {
-      if (currentHandle === handle) {
-        currentHandle = null
+      if (currentHandles.get(scanKey) === handle) {
+        currentHandles.delete(scanKey)
         if (
           error instanceof AiVaultServiceDeadlineError &&
           error.operation === 'scan' &&
           error.requestId === serviceRequestId
         ) {
-          publish({ ...current, stage: 'stopped', settledAt: now() })
+          publish(scanKey, { ...current, stage: 'stopped', settledAt: now() })
         } else {
-          publish(null)
+          publish(scanKey, null)
         }
       }
     }
   }
-  currentHandle = handle
-  publish(current)
+  currentHandles.set(scanKey, handle)
+  publish(scanKey, null)
   return handle
 }
 
 /** Runs the scanner service request using the coordinator's progress ownership. */
 export async function requestLocalAiVaultScan<T extends { work: AiVaultScanWork | null }>(
   request: (listener: AiVaultServiceScanListener) => Promise<T>,
-  options: { now?: () => number; progress?: LocalAiVaultScanProgressHandle } = {}
+  options: {
+    now?: () => number
+    progress?: LocalAiVaultScanProgressHandle
+    scanKey?: string
+    scanId?: string
+  } = {}
 ): Promise<T> {
-  const progress = options.progress ?? startLocalAiVaultScanProgress(options.now)
+  const progress =
+    options.progress ??
+    startLocalAiVaultScanProgress(options.scanKey ?? '', options.scanId ?? '', options.now)
   try {
     const value = await request(progress)
     progress.finish(value.work)
@@ -97,7 +129,7 @@ export async function requestLocalAiVaultScan<T extends { work: AiVaultScanWork 
 }
 
 export function resetLocalAiVaultScanProgressForTests(): void {
-  latest = null
-  currentHandle = null
+  latest.clear()
+  currentHandles.clear()
   listeners.clear()
 }

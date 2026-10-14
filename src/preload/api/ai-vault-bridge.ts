@@ -16,7 +16,8 @@ import type { AiVaultPrepareSessionResumeArgs } from '../../shared/ai-vault-resu
 import type { PreloadApi } from '../api-types'
 import {
   AI_VAULT_SCAN_PROGRESS_CHANNEL,
-  type AiVaultScanProgress
+  type AiVaultScanProgress,
+  type AiVaultScanProgressUpdate
 } from '../../shared/ai-vault-scan-progress'
 
 function searchClient(
@@ -61,11 +62,11 @@ export const aiVaultApi = {
     ipcRenderer.on('aiVault:windowFocused', listener)
     return () => ipcRenderer.removeListener('aiVault:windowFocused', listener)
   },
-  getScanProgress: (): Promise<AiVaultScanProgress | null> =>
-    ipcRenderer.invoke('aiVault:getScanProgress'),
-  onScanProgress: (callback: (progress: AiVaultScanProgress | null) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, progress: AiVaultScanProgress | null) =>
-      callback(progress)
+  getScanProgress: (scanKey: string): Promise<AiVaultScanProgress | null> =>
+    ipcRenderer.invoke('aiVault:getScanProgress', scanKey),
+  onScanProgress: (callback: (update: AiVaultScanProgressUpdate) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, update: AiVaultScanProgressUpdate) =>
+      callback(update)
     ipcRenderer.on(AI_VAULT_SCAN_PROGRESS_CHANNEL, listener)
     return () => ipcRenderer.removeListener(AI_VAULT_SCAN_PROGRESS_CHANNEL, listener)
   }

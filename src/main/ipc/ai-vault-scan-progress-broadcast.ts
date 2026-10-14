@@ -7,14 +7,16 @@ import {
 
 let unsubscribe: (() => void) | null = null
 
-/** Every window follows this computer's scan; one that opens later asks for where it stands. */
+/** Windows receive keyed changes; a late opener asks for its own scan entry. */
 export function registerAiVaultScanProgressBroadcast(): void {
-  ipcMain.handle('aiVault:getScanProgress', () => localAiVaultScanProgress())
+  ipcMain.handle('aiVault:getScanProgress', (_event, scanKey: string) =>
+    localAiVaultScanProgress(scanKey)
+  )
   unsubscribe?.()
-  unsubscribe = onLocalAiVaultScanProgress((progress) => {
+  unsubscribe = onLocalAiVaultScanProgress((update) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) {
-        window.webContents.send(AI_VAULT_SCAN_PROGRESS_CHANNEL, progress)
+        window.webContents.send(AI_VAULT_SCAN_PROGRESS_CHANNEL, update)
       }
     }
   })

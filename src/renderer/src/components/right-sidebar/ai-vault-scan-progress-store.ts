@@ -1,11 +1,25 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import type { AiVaultScanProgress } from '../../../../shared/ai-vault-scan-progress'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostScope } from '../../../../shared/execution-host'
 
-let progress: AiVaultScanProgress | null = null
-let pushed = false
-let subscribed = false
+const MAX_PROGRESS_ENTRIES = 8
+const progressByKey = new Map<string, AiVaultScanProgress>()
+const requestedKeys = new Set<string>()
+const pushedKeys = new Set<string>()
 const listeners = new Set<() => void>()
+let subscribed = false
+
+function rememberKey(keys: Set<string>, scanKey: string): void {
+  keys.delete(scanKey)
+  keys.add(scanKey)
+  while (keys.size > MAX_PROGRESS_ENTRIES) {
+    const oldest = keys.values().next().value
+    if (oldest === undefined) {
+      break
+    }
+    keys.delete(oldest)
+  }
+}
 
 function emit(): void {
   for (const listener of listeners) {
@@ -13,51 +27,75 @@ function emit(): void {
   }
 }
 
-// Why: one subscription for the app's life, so a scan that settles while the
-// panel is closed still shows when it reopens; main answers with where the
-// scan stands for a window that opened after it started.
+function setProgress(scanKey: string, progress: AiVaultScanProgress | null): void {
+  progressByKey.delete(scanKey)
+  if (progress) {
+    progressByKey.set(scanKey, progress)
+  }
+  while (progressByKey.size > MAX_PROGRESS_ENTRIES) {
+    const oldest = progressByKey.keys().next().value
+    if (oldest === undefined) {
+      break
+    }
+    progressByKey.delete(oldest)
+  }
+  emit()
+}
+
 function ensureSubscribed(): void {
   if (subscribed) {
     return
   }
   subscribed = true
-  window.api.aiVault.onScanProgress?.((next) => {
-    pushed = true
-    progress = next
-    emit()
+  window.api.aiVault.onScanProgress?.(({ scanKey, progress }) => {
+    rememberKey(pushedKeys, scanKey)
+    setProgress(scanKey, progress)
   })
+}
+
+function loadKey(scanKey: string): void {
+  if (requestedKeys.has(scanKey)) {
+    return
+  }
+  rememberKey(requestedKeys, scanKey)
   void window.api.aiVault
-    .getScanProgress?.()
-    .then((current) => {
-      if (!pushed) {
-        progress = current
-        emit()
+    .getScanProgress?.(scanKey)
+    .then((progress) => {
+      if (!pushedKeys.has(scanKey)) {
+        setProgress(scanKey, progress)
       }
     })
     .catch(() => undefined)
 }
 
-function subscribe(listener: () => void): () => void {
-  ensureSubscribed()
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-/**
- * This computer's Session History scan, for a panel listing this computer.
- * Remote hosts and the all-hosts merge have no progress stream yet, so they get
- * null and keep the plain spinner, as does a client whose host never reports.
- */
+/** Only the local request's scanner entry can supply this panel's strip. */
 export function useAiVaultScanProgress(
-  executionHostScope: ExecutionHostScope
+  executionHostScope: ExecutionHostScope,
+  scanKey: string
 ): AiVaultScanProgress | null {
-  const current = useSyncExternalStore(subscribe, () => progress)
-  return executionHostScope === LOCAL_EXECUTION_HOST_ID ? current : null
+  const local = executionHostScope === LOCAL_EXECUTION_HOST_ID
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      if (local) {
+        ensureSubscribed()
+        loadKey(scanKey)
+      }
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    [local, scanKey]
+  )
+  const snapshot = useCallback(
+    () => (local ? (progressByKey.get(scanKey) ?? null) : null),
+    [local, scanKey]
+  )
+  return useSyncExternalStore(subscribe, snapshot)
 }
 
 export function resetAiVaultScanProgressStoreForTests(): void {
-  progress = null
-  pushed = false
+  progressByKey.clear()
+  requestedKeys.clear()
+  pushedKeys.clear()
   subscribed = false
   listeners.clear()
 }

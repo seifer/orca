@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 import {
   configureAiVaultSessionSources,
   listAiVaultSessions as listCachedLocalAiVaultSessions,
+  AiVaultLocalScanError,
   resetAiVaultSessionListCacheForTests,
   type AiVaultSessionSources
 } from '../ai-vault/cached-session-list'
@@ -214,11 +215,14 @@ async function scanLocalAiVaultSessionsAsIssue(
     // so the row carries actionable copy and the log keeps the original.
     const raw = error instanceof Error ? error.message : 'Local session scan failed.'
     console.error('[ai-vault] local session scan failed:', raw)
-    return aiVaultScanIssueResult({
+    const result = aiVaultScanIssueResult({
       executionHostId: LOCAL_EXECUTION_HOST_ID,
       path: 'this computer',
       message: describeAiVaultScanError(raw)
     })
+    return error instanceof AiVaultLocalScanError
+      ? { ...result, scanId: error.scanId, scanKey: error.scanKey }
+      : result
   }
 }
 

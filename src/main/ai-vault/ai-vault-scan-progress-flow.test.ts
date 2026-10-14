@@ -83,7 +83,7 @@ function startScan(): {
     init: () => ({ sessionParseCache: null, sessionSearch: null })
   })
   const published: (AiVaultScanProgress | null)[] = []
-  onLocalAiVaultScanProgress((progress) => published.push(progress))
+  onLocalAiVaultScanProgress(({ progress }) => published.push(progress))
   const scan = requestLocalAiVaultScan(
     (listener) =>
       client.request<{ work: AiVaultScanWork | null }>(
@@ -108,7 +108,7 @@ describe('Session History scan progress, scanner child to window', () => {
 
     const { child, scan, published } = startScan()
     readyAiVaultServiceChild(child)
-    await vi.waitFor(() => expect(localAiVaultScanProgress()?.stage).toBe('finding'))
+    await vi.waitFor(() => expect(localAiVaultScanProgress('')?.stage).toBe('finding'))
     const id = aiVaultServiceRequestId(child, 'scan')
     child.emit('message', { type: 'progress', id, units: 1, work: reports[0] })
     child.emit('message', {
@@ -119,13 +119,16 @@ describe('Session History scan progress, scanner child to window', () => {
     })
     await scan
 
-    expect(published.map((progress) => progress?.stage)).toEqual([
+    expect(published.map((progress) => progress?.stage ?? null)).toEqual([
+      null,
       'finding',
       reports[0]!.stage,
       'finished'
     ])
-    expect(localAiVaultScanProgress()).toEqual({
+    expect(localAiVaultScanProgress('')).toEqual({
       ...final,
+      scanKey: '',
+      scanId: '',
       stage: 'finished',
       startedAt: 5_000,
       settledAt: 5_000
@@ -156,22 +159,24 @@ describe('Session History scan progress, scanner child to window', () => {
   })
 
   it('replaces an old stop during preparation and clears it for a later ordinary failure', () => {
-    const old = startLocalAiVaultScanProgress(() => 1_000)
+    const old = startLocalAiVaultScanProgress('scope', 'old', () => 1_000)
     old.sent(1)
     old.fail(new AiVaultServiceDeadlineError('scan timed out', 'scan', 1))
-    expect(localAiVaultScanProgress()?.stage).toBe('stopped')
+    expect(localAiVaultScanProgress('scope')?.stage).toBe('stopped')
 
-    const replacement = startLocalAiVaultScanProgress(() => 2_000)
+    const replacement = startLocalAiVaultScanProgress('scope', 'replacement', () => 2_000)
     old.fail(new Error('cancelled'))
-    expect(localAiVaultScanProgress()).toMatchObject({ stage: 'finding', startedAt: 2_000 })
+    expect(localAiVaultScanProgress('scope')).toBeNull()
+    replacement.sent(2)
+    expect(localAiVaultScanProgress('scope')).toMatchObject({ stage: 'finding', startedAt: 2_000 })
 
     replacement.fail(new Error('service unavailable'))
-    expect(localAiVaultScanProgress()).toBeNull()
+    expect(localAiVaultScanProgress('scope')).toBeNull()
 
-    const interrupted = startLocalAiVaultScanProgress(() => 3_000)
+    const interrupted = startLocalAiVaultScanProgress('scope', 'interrupted', () => 3_000)
     interrupted.sent(3)
     interrupted.fail(new AiVaultServiceDeadlineError('another scan timed out', 'scan', 2))
-    expect(localAiVaultScanProgress()).toBeNull()
+    expect(localAiVaultScanProgress('scope')).toBeNull()
   })
 
   it('does not call a healthy scan stopped when the interactive lane expires', async () => {
@@ -196,7 +201,7 @@ describe('Session History scan progress, scanner child to window', () => {
 
     expect(await rejectedInteractive).toBeInstanceOf(AiVaultServiceDeadlineError)
     expect(await rejectedScan).toBeInstanceOf(AiVaultServiceDeadlineError)
-    expect(localAiVaultScanProgress()).toBeNull()
+    expect(localAiVaultScanProgress('')).toBeNull()
     client.dispose()
   })
 

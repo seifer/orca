@@ -50,6 +50,7 @@ import { useAiVaultPanelSessionResume } from './use-ai-vault-panel-session-resum
 import { AiVaultScanProgressStrip } from './AiVaultScanProgressStrip'
 import { useAiVaultScanProgress } from './ai-vault-scan-progress-store'
 import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
+import { aiVaultLocalScanKey } from '../../../../shared/ai-vault-local-scan-key'
 export default function AiVaultPanel(): React.JSX.Element {
   const activeWorktreeId = useActiveWorktreeId()
   const activeWorktree = useActiveWorktree()
@@ -146,7 +147,13 @@ export default function AiVaultPanel(): React.JSX.Element {
   const search = useAiVaultPanelSearch(query, agents, searchWithin, executionHostScope, searchSort)
   const { searching, searchHits } = search
   const sessions = searching ? search.sessions : history
-  const scanProgress = useAiVaultScanProgress(executionHostScope)
+  const requestedScanKey = aiVaultLocalScanKey({
+    scopePaths,
+    includeAntigravityIdeSessions: true,
+    limit: sessionLimit === 'unlimited' ? undefined : sessionLimit,
+    unlimited: sessionLimit === 'unlimited'
+  })
+  const scanProgress = useAiVaultScanProgress(executionHostScope, requestedScanKey)
   const stripProgress = searching ? null : scanProgress
   // Deliberately blind to the active repo/worktree: rebuilding these session
   // maps on every worktree switch is what made switching visibly slow (#10841 era).
@@ -277,10 +284,11 @@ export default function AiVaultPanel(): React.JSX.Element {
         <AiVaultScanIssueBanners
           scanResult={currentAiVaultScanIssueResult(
             scanResult,
-            stripProgress,
             loading && executionHostScope === LOCAL_EXECUTION_HOST_ID
           )}
-          localScanStopShown={stripProgress?.stage === 'stopped'}
+          localScanStopShown={
+            stripProgress?.stage === 'stopped' && scanResult?.scanId === stripProgress.scanId
+          }
         />
       )}
       <AiVaultPanelSearch search={search} noAgents={agents.length === 0}>

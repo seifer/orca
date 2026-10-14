@@ -15,16 +15,16 @@ describe('AiVaultScanCoordinator', () => {
   it('keeps the replacement finding while the old scan aborts before root preparation ends', async () => {
     const coordinator = new AiVaultScanCoordinator()
     const stages: (string | null)[] = []
-    onLocalAiVaultScanProgress((progress) => stages.push(progress?.stage ?? null))
+    onLocalAiVaultScanProgress(({ progress }) => stages.push(progress?.stage ?? null))
     try {
-      const stopped = startLocalAiVaultScanProgress(() => 500)
+      const stopped = startLocalAiVaultScanProgress('scope', 'stopped', () => 500)
       stopped.sent(1)
       stopped.fail(new AiVaultServiceDeadlineError('scan timed out', 'scan', 1))
       let old: LocalAiVaultScanProgressHandle | null = null
       const first = coordinator.run({
         key: 'scope',
-        onCreate: () => {
-          old = startLocalAiVaultScanProgress(() => 1_000)
+        onCreate: (id) => {
+          old = startLocalAiVaultScanProgress('scope', id, () => 1_000)
         },
         onError: (error) => old?.fail(error),
         start: (signal) =>
@@ -37,8 +37,8 @@ describe('AiVaultScanCoordinator', () => {
       const replacement = coordinator.run({
         key: 'scope',
         force: true,
-        onCreate: () => {
-          startLocalAiVaultScanProgress(() => 2_000)
+        onCreate: (id) => {
+          startLocalAiVaultScanProgress('scope', id, () => 2_000)
         },
         start: () =>
           new Promise<typeof EMPTY_RESULT>((resolve) => {
@@ -46,8 +46,8 @@ describe('AiVaultScanCoordinator', () => {
           })
       })
       await Promise.resolve()
-      expect(localAiVaultScanProgress()).toMatchObject({ stage: 'finding', startedAt: 2_000 })
-      expect(stages.slice(stages.lastIndexOf('finding'))).toEqual(['finding'])
+      expect(localAiVaultScanProgress('scope')).toBeNull()
+      expect(stages.at(-1)).toBeNull()
       finishPreparation?.(EMPTY_RESULT)
       await expect(Promise.all([first, replacement])).resolves.toEqual([EMPTY_RESULT, EMPTY_RESULT])
     } finally {
