@@ -9,6 +9,8 @@ import { createTaskPageJiraLoadFailureState } from '@/components/task-page-jira-
 import { searchTaskPageJiraIssues } from '@/components/task-page-jira-search'
 import { JIRA_ITEM_LIMIT, TASK_SEARCH_DEBOUNCE_MS } from './task-page-source-context'
 import { defaultScopeSource } from '@/lib/default-creation-host'
+import { buildJiraPresetJql } from '../../../shared/jira-preset-jql'
+import { restrictJiraQueryToProject } from '../../../shared/jira-project-reference'
 export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffectsModel) {
   const {
     settings,
@@ -35,6 +37,7 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     appliedJiraSearch,
     setAppliedJiraSearch,
     activeJiraPreset,
+    jiraProjectFilter,
     jiraRefreshNonce,
     setJiraProjectStatusOrder,
     displayedJiraIssues
@@ -82,15 +85,30 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     const request =
       trimmed.length > 0
         ? searchTaskPageJiraIssues(trimmed, (jql) =>
-            searchJiraIssues(jql, JIRA_ITEM_LIMIT, {
+            searchJiraIssues(
+              jiraProjectFilter ? restrictJiraQueryToProject(jql, jiraProjectFilter) : jql,
+              JIRA_ITEM_LIMIT,
+              {
+                sourceContext: jiraTaskSourceContext,
+                ...(jiraProjectFilter ? { siteId: jiraProjectFilter.siteId } : {}),
+                force
+              }
+            )
+          )
+        : jiraProjectFilter
+          ? searchJiraIssues(
+              restrictJiraQueryToProject(buildJiraPresetJql(activeJiraPreset), jiraProjectFilter),
+              JIRA_ITEM_LIMIT,
+              {
+                sourceContext: jiraTaskSourceContext,
+                siteId: jiraProjectFilter.siteId,
+                force
+              }
+            ).then((issues) => ({ issues, jqlRejection: null }))
+          : listJiraIssues(activeJiraPreset, JIRA_ITEM_LIMIT, {
               sourceContext: jiraTaskSourceContext,
               force
-            })
-          )
-        : listJiraIssues(activeJiraPreset, JIRA_ITEM_LIMIT, {
-            sourceContext: jiraTaskSourceContext,
-            force
-          }).then((issues) => ({ issues, jqlRejection: null }))
+            }).then((issues) => ({ issues, jqlRejection: null }))
     void request
       .then(({ issues, jqlRejection }) => {
         if (cancelled) {
@@ -139,6 +157,7 @@ export function useTaskPageJiraListEffects(model: TaskPageLinearCollectionEffect
     selectedJiraSiteId,
     appliedJiraSearch,
     activeJiraPreset,
+    jiraProjectFilter,
     jiraRefreshNonce,
     taskResumeApplied,
     jiraTaskSourceContext,

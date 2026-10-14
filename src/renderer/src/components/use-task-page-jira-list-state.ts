@@ -11,8 +11,16 @@ import type {
 } from './jira-issue-sorter'
 import { jiraListPriorities } from '@/runtime/runtime-jira-client'
 import { defaultScopeSource } from '@/lib/default-creation-host'
+import { useTaskPageJiraProjectScope } from './use-task-page-jira-project-scope'
 export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
   const { settings, jiraConnected, selectedJiraSiteId, taskSource, jiraTaskSourceContext } = model
+  const jiraProjectScope = useTaskPageJiraProjectScope(
+    model.repos,
+    model.selectedRepos,
+    model.pageData.preselectedRepoId,
+    model.accountBackedTaskSourceHostId,
+    selectedJiraSiteId
+  )
   // Jira tab state
   const [jiraIssues, setJiraIssues] = useState<JiraIssue[]>([])
   const [jiraLoading, setJiraLoading] = useState(false)
@@ -86,6 +94,7 @@ export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
     [jiraOrderBy]
   )
   return Object.assign(model, {
+    ...jiraProjectScope,
     jiraIssues,
     setJiraIssues,
     jiraLoading,
