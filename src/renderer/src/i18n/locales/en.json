@@ -19586,7 +19586,8 @@
     }
   },
   "common": {
-    "retry": "Retry"
+    "retry": "Retry",
+    "cancel": "Cancel"
   },
   "terminal": {
     "sessionSaveFailure": {
@@ -19965,6 +19966,25 @@
       "waitingAriaLabel": "Update waiting for other Orca instances. Click to expand.",
       "preparingLabel": "Preparing update",
       "preparingAriaLabel": "Preparing update. Click to expand."
+    }
+  },
+  "jira": {
+    "prompt": {
+      "dialogTitle": "Copy prompt from template",
+      "template": "Template",
+      "custom": "Custom template",
+      "templateText": "Template text",
+      "variables": "Use $jira-issue for the issue context and $other-prompt for your additional instructions. Saved on this device.",
+      "other": "Additional instructions (optional)",
+      "preview": "Preview",
+      "implementation": "Start implementation",
+      "bug": "Investigate bug",
+      "testPlan": "Write test plan",
+      "prSummary": "Draft PR summary"
+    },
+    "copy": {
+      "context": "Copy context for {{key}}",
+      "actions": "Copy issue context"
     }
   }
 }
