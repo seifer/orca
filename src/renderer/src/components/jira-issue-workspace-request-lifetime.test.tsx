@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ComponentProps, type ReactNode } from 'react'
+import { act, StrictMode, type ComponentProps, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JiraComment, JiraIssue } from '../../../shared/jira-types'
@@ -45,13 +45,14 @@ vi.mock('@/runtime/runtime-jira-client', () => {
     return new Promise((resolve, reject) => queue.push({ key, resolve, reject }))
   }
   return {
-    jiraGetIssue: (_settings: unknown, key: string) => request(boundary.issues, key),
-    jiraIssueComments: (_settings: unknown, key: string) => request(boundary.comments, key),
-    jiraListTransitions: async () => [],
-    jiraListPriorities: async () => [],
-    jiraListAssignableUsers: async () => [],
-    jiraUpdateIssue: async () => ({ ok: true }),
-    jiraAddIssueComment: async () => ({ ok: true, id: 'added' })
+    jiraGetIssueForTarget: (_settings: unknown, key: string) => request(boundary.issues, key),
+    jiraIssueCommentsForTarget: (_settings: unknown, key: string) =>
+      request(boundary.comments, key),
+    jiraListTransitionsForTarget: async () => [],
+    jiraListPrioritiesForTarget: async () => [],
+    jiraListAssignableUsersForTarget: async () => [],
+    jiraUpdateIssueForTarget: async () => ({ ok: true }),
+    jiraAddIssueCommentForTarget: async () => ({ ok: true, id: 'added' })
   }
 })
 vi.mock('@/components/ui/sheet', () => {
@@ -125,13 +126,13 @@ function comment(id: string): JiraComment {
   return { id, body: id, createdAt: '2026-10-02' }
 }
 
-async function render(selected: JiraIssue | null): Promise<void> {
+async function render(selected: JiraIssue | null, strict = false): Promise<void> {
   if (!root) {
     throw new Error('Missing React root')
   }
   const mountedRoot = root
   await act(async () => {
-    mountedRoot.render(
+    const workspace = (
       <JiraIssueWorkspace
         issue={selected}
         sourceContext={sourceContext}
@@ -139,6 +140,7 @@ async function render(selected: JiraIssue | null): Promise<void> {
         onClose={() => {}}
       />
     )
+    mountedRoot.render(strict ? <StrictMode>{workspace}</StrictMode> : workspace)
   })
 }
 
@@ -188,6 +190,28 @@ afterEach(async () => {
 })
 
 describe('Jira issue workspace request lifetime', () => {
+  it('hydrates after StrictMode replays mount effects and rejects the discarded reads', async () => {
+    await render(issue(), true)
+    expect(boundary.issues).toHaveLength(2)
+    expect(boundary.comments).toHaveLength(2)
+    await act(async () => {
+      take(boundary.issues).resolve(issue('JIR-1', 'Discarded detail'))
+      take(boundary.comments).resolve([comment('discarded')])
+    })
+    expect(text('title')).toBe('JIR-1')
+    expect(text('comments')).toBe('')
+    expect(text('issue-loading')).toBe('true')
+    expect(text('comments-loading')).toBe('true')
+    await act(async () => {
+      take(boundary.issues).resolve(issue('JIR-1', 'Hydrated detail'))
+      take(boundary.comments).resolve([comment('current')])
+    })
+    expect(text('title')).toBe('Hydrated detail')
+    expect(text('comments')).toBe('current')
+    expect(text('issue-loading')).toBe('false')
+    expect(text('comments-loading')).toBe('false')
+  })
+
   it('discards late detail and comments after closing the mounted workspace', async () => {
     await render(issue())
     await render(null)

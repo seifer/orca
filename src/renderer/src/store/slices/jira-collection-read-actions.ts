@@ -177,9 +177,7 @@ export function createJiraCollectionReadActions(
         return inflight.promise
       }
       let entry: InflightJiraReadRequest<JiraIssue[]>
-      const request = filters
-        ? jiraListIssues(scope.settings, filter, limit, siteId, filters)
-        : jiraListIssues(scope.settings, filter, limit, siteId)
+      const request = jiraListIssues(scope.settings, filter, limit, siteId, filters)
       const promise = request
         .then((issues) => {
           if (

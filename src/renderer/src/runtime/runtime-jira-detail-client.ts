@@ -3,7 +3,9 @@ import type {
   JiraIssue,
   JiraIssueUpdate,
   JiraMutationResult,
-  JiraTransition
+  JiraTransition,
+  JiraPriority,
+  JiraProjectStatusOrder
 } from '../../../shared/jira-types'
 import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { JIRA_TRANSITION_FIELDS_RUNTIME_CAPABILITY } from '../../../shared/protocol-version'
@@ -87,4 +89,47 @@ export async function jiraListTransitionsForTarget(
   return target.kind === 'environment'
     ? callRuntimeRpc<JiraTransition[]>(target, 'jira.listTransitions', args, { timeoutMs: 30_000 })
     : window.api.jira.listTransitions(args)
+}
+
+export type JiraCommentResult = { ok: true; id: string } | { ok: false; error: string }
+
+export async function jiraListPrioritiesForTarget(
+  target: RuntimeClientTarget,
+  siteId?: string | null
+): Promise<JiraPriority[]> {
+  return target.kind === 'environment'
+    ? callRuntimeRpc<JiraPriority[]>(
+        target,
+        'jira.listPriorities',
+        siteId ? { siteId } : undefined,
+        { timeoutMs: 30_000 }
+      )
+    : window.api.jira.listPriorities(siteId ? { siteId } : undefined)
+}
+
+export async function jiraAddIssueCommentForTarget(
+  target: RuntimeClientTarget,
+  key: string,
+  body: string,
+  siteId?: string | null
+): Promise<JiraCommentResult> {
+  const args = { key, body, siteId: siteId ?? undefined }
+  return target.kind === 'environment'
+    ? callRuntimeRpc<JiraCommentResult>(target, 'jira.addIssueComment', args, {
+        timeoutMs: 30_000
+      })
+    : window.api.jira.addIssueComment(args)
+}
+
+export async function jiraGetProjectStatusOrderForTarget(
+  target: RuntimeClientTarget,
+  projectKey: string,
+  siteId?: string | null
+): Promise<JiraProjectStatusOrder> {
+  const args = { projectKey, siteId: siteId ?? undefined }
+  return target.kind === 'environment'
+    ? callRuntimeRpc<JiraProjectStatusOrder>(target, 'jira.getProjectStatusOrder', args, {
+        timeoutMs: 30_000
+      })
+    : window.api.jira.getProjectStatusOrder(args)
 }

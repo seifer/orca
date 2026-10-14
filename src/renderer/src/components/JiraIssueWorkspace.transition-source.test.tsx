@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JiraIssue, JiraTransition } from '../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../shared/task-source-context'
+import { taskSourceRuntimeTarget } from '@/lib/task-source-runtime-target'
 import type { JiraIssueMetadataBar } from './jira-issue-workspace-chrome'
 import JiraIssueWorkspace from './JiraIssueWorkspace'
 
@@ -29,13 +30,13 @@ vi.mock('@/i18n/i18n', () => ({
     fallback.replace(/{{(\w+)}}/g, (_match, key) => values?.[key] ?? '')
 }))
 vi.mock('@/runtime/runtime-jira-client', () => ({
-  jiraGetIssue: async () => null,
-  jiraIssueComments: async () => [],
-  jiraListTransitions: mocks.transitions,
-  jiraListPriorities: async () => [],
-  jiraListAssignableUsers: async () => [],
-  jiraUpdateIssue: mocks.update,
-  jiraAddIssueComment: async () => ({ ok: true })
+  jiraGetIssueForTarget: async () => null,
+  jiraIssueCommentsForTarget: async () => [],
+  jiraListTransitionsForTarget: mocks.transitions,
+  jiraListPrioritiesForTarget: async () => [],
+  jiraListAssignableUsersForTarget: async () => [],
+  jiraUpdateIssueForTarget: mocks.update,
+  jiraAddIssueCommentForTarget: async () => ({ ok: true })
 }))
 vi.mock('@/components/ui/sheet', () => {
   const Content = ({ children }: { children: ReactNode }) => <div>{children}</div>
@@ -140,7 +141,7 @@ describe('Jira transition form source ownership', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Change status' }))
       await waitFor(() =>
         expect(mocks.update).toHaveBeenCalledWith(
-          next,
+          taskSourceRuntimeTarget(next),
           issue.key,
           { transitionId: 'new', transitionComment: 'New source comment' },
           'site-a'

@@ -31,13 +31,19 @@ import {
   jiraGetIssueForTarget,
   jiraIssueCommentsForTarget,
   jiraUpdateIssueForTarget,
-  jiraListTransitionsForTarget
+  jiraListTransitionsForTarget,
+  jiraListPrioritiesForTarget,
+  jiraAddIssueCommentForTarget,
+  jiraGetProjectStatusOrderForTarget
 } from './runtime-jira-detail-client'
 export {
   jiraGetIssueForTarget,
   jiraIssueCommentsForTarget,
   jiraUpdateIssueForTarget,
-  jiraListTransitionsForTarget
+  jiraListTransitionsForTarget,
+  jiraListPrioritiesForTarget,
+  jiraAddIssueCommentForTarget,
+  jiraGetProjectStatusOrderForTarget
 } from './runtime-jira-detail-client'
 
 export async function jiraIssueComments(
@@ -52,6 +58,7 @@ export { jiraLookupIssueSummary, jiraReadStatus } from './runtime-jira-summary-c
 export {
   jiraCreateIssue,
   jiraListAssignableUsers,
+  jiraListAssignableUsersForTarget,
   jiraListAssignableUsersForProject,
   jiraSearchUsers
 } from './runtime-jira-user-fields-client'
@@ -194,13 +201,7 @@ export async function jiraAddIssueComment(
   body: string,
   siteId?: string | null
 ): Promise<JiraCommentResult> {
-  const target = getJiraRuntimeTarget(settings)
-  const args = { key, body, siteId: siteId ?? undefined }
-  return target.kind === 'environment'
-    ? callRuntimeRpc<JiraCommentResult>(target, 'jira.addIssueComment', args, {
-        timeoutMs: 30_000
-      })
-    : window.api.jira.addIssueComment(args)
+  return jiraAddIssueCommentForTarget(getJiraRuntimeTarget(settings), key, body, siteId)
 }
 
 export async function jiraListProjects(
@@ -246,18 +247,9 @@ export async function jiraListPriorities(
   settings: RuntimeJiraSettings,
   siteId?: string | null
 ): Promise<JiraPriority[]> {
-  const target = getJiraRuntimeTarget(settings)
-  return target.kind === 'environment'
-    ? callRuntimeRpc<JiraPriority[]>(
-        target,
-        'jira.listPriorities',
-        siteId ? { siteId } : undefined,
-        { timeoutMs: 30_000 }
-      )
-    : window.api.jira.listPriorities(siteId ? { siteId } : undefined)
+  return jiraListPrioritiesForTarget(getJiraRuntimeTarget(settings), siteId)
 }
 
-/** Lists users assignable to an existing issue, via the active runtime. */
 export async function jiraListTransitions(
   settings: RuntimeJiraSettings,
   key: string,
@@ -271,11 +263,5 @@ export async function jiraGetProjectStatusOrder(
   projectKey: string,
   siteId?: string | null
 ): Promise<JiraProjectStatusOrder> {
-  const target = getJiraRuntimeTarget(settings)
-  const args = { projectKey, siteId: siteId ?? undefined }
-  return target.kind === 'environment'
-    ? callRuntimeRpc<JiraProjectStatusOrder>(target, 'jira.getProjectStatusOrder', args, {
-        timeoutMs: 30_000
-      })
-    : window.api.jira.getProjectStatusOrder(args)
+  return jiraGetProjectStatusOrderForTarget(getJiraRuntimeTarget(settings), projectKey, siteId)
 }

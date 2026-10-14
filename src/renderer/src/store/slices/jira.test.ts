@@ -208,7 +208,7 @@ describe('createJiraSlice runtime context', () => {
 
     sourceResult.resolve([{ ...issue('ALP-1'), title: 'Source issue' }])
     await expect(request).resolves.toMatchObject([{ key: 'ALP-1', title: 'Source issue' }])
-    expect(jiraListIssues).toHaveBeenCalledWith(sourceContext, 'assigned', 30, 'site-1')
+    expect(jiraListIssues).toHaveBeenCalledWith(sourceContext, 'assigned', 30, 'site-1', undefined)
     expect(Object.values(store.getState().jiraSearchCache)).toHaveLength(1)
     expect(store.getState().jiraSearchCache['site-1::list::assigned::30']).toBeUndefined()
   })

@@ -12,10 +12,21 @@ import type {
   JiraIssueSortDirection,
   JiraPrioritiesBySite
 } from './jira-issue-sorter'
-import { jiraListPriorities } from '@/runtime/runtime-jira-client'
-import { defaultScopeSource } from '@/lib/default-creation-host'
+import { jiraListPrioritiesForTarget } from '@/runtime/runtime-jira-client'
+import { ipcOrRuntimeTargetForHostId } from '@/runtime/runtime-client-target'
 export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
-  const { settings, jiraConnected, selectedJiraSiteId, taskSource, jiraTaskSourceContext } = model
+  const {
+    jiraConnected,
+    selectedJiraSiteId,
+    taskSource,
+    jiraTaskSourceContext,
+    accountBackedTaskSourceHostId
+  } = model
+  const owner = useMemo(
+    () =>
+      ipcOrRuntimeTargetForHostId(jiraTaskSourceContext?.hostId ?? accountBackedTaskSourceHostId),
+    [accountBackedTaskSourceHostId, jiraTaskSourceContext]
+  )
   // Jira tab state
   const [jiraIssues, setJiraIssues] = useState<JiraIssue[]>([])
   const [jiraLoading, setJiraLoading] = useState(false)
@@ -56,7 +67,7 @@ export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
     return JSON.stringify([...new Set(siteIds)].sort())
   }, [jiraIssues, selectedJiraSiteId])
   useEffect(() => {
-    if (taskSource !== 'jira' || !jiraConnected || jiraOrderBy !== 'priority') {
+    if (taskSource !== 'jira' || !jiraConnected || jiraOrderBy !== 'priority' || !owner) {
       setJiraPrioritiesBySite((current) => (current.size === 0 ? current : new Map()))
       return
     }
@@ -65,10 +76,7 @@ export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
     void Promise.all(
       jiraPrioritySiteIds.map(async (siteId) => {
         try {
-          return [
-            siteId,
-            await jiraListPriorities(jiraTaskSourceContext ?? defaultScopeSource(settings), siteId)
-          ] as const
+          return [siteId, await jiraListPrioritiesForTarget(owner, siteId)] as const
         } catch {
           return [siteId, [] as JiraPriority[]] as const
         }
@@ -81,14 +89,7 @@ export function useTaskPageJiraListState(model: TaskPageLinearViewStateModel) {
     return () => {
       cancelled = true
     }
-  }, [
-    jiraConnected,
-    jiraOrderBy,
-    jiraPrioritySiteIdsKey,
-    jiraTaskSourceContext,
-    settings,
-    taskSource
-  ])
+  }, [jiraConnected, jiraOrderBy, jiraPrioritySiteIdsKey, owner, taskSource])
   const handleJiraSort = useCallback(
     (column: JiraIssueSortColumn) => {
       if (jiraOrderBy === column) {

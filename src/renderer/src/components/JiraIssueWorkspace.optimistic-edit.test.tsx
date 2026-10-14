@@ -6,29 +6,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JiraIssue } from '../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../shared/task-source-context'
 import type * as I18n from '@/i18n/i18n'
+import type { AppState } from '../store/types'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import JiraIssueWorkspace from './JiraIssueWorkspace'
 
 const runtimeMocks = vi.hoisted(() => ({
-  jiraAddIssueComment: vi.fn(),
-  jiraGetIssue: vi.fn(),
-  jiraIssueComments: vi.fn(),
-  jiraListAssignableUsers: vi.fn(),
-  jiraListPriorities: vi.fn(),
-  jiraListTransitions: vi.fn(),
-  jiraUpdateIssue: vi.fn()
+  jiraAddIssueCommentForTarget: vi.fn(),
+  jiraGetIssueForTarget: vi.fn(),
+  jiraIssueCommentsForTarget: vi.fn(),
+  jiraListAssignableUsersForTarget: vi.fn(),
+  jiraListPrioritiesForTarget: vi.fn(),
+  jiraListTransitionsForTarget: vi.fn(),
+  jiraUpdateIssueForTarget: vi.fn()
 }))
 
 const store = vi.hoisted(() => ({
-  patchJiraIssue: (_key: string, _patch: object): void => undefined
+  patchJiraIssue: (_key: string, _patch: Partial<JiraIssue>): void => undefined
 }))
 
 vi.mock('@/runtime/runtime-jira-client', () => runtimeMocks)
 vi.mock('@/store', () => ({
-  useAppStore: (selector: (state: object) => unknown) =>
+  useAppStore: (selector: (state: Pick<AppState, 'settings' | 'patchJiraIssue'>) => unknown) =>
     selector({
       settings: null,
-      patchJiraIssue: (key: string, patch: object) => store.patchJiraIssue(key, patch)
+      patchJiraIssue: (key: string, patch: Partial<JiraIssue>) => store.patchJiraIssue(key, patch)
     })
 }))
 vi.mock('@/i18n/i18n', async (importOriginal) => ({
@@ -111,22 +112,22 @@ beforeEach(() => {
   for (const mock of Object.values(runtimeMocks)) {
     mock.mockReset()
   }
-  runtimeMocks.jiraGetIssue.mockImplementation(async () => jiraIssue(serverTitle))
-  runtimeMocks.jiraIssueComments.mockResolvedValue([])
-  runtimeMocks.jiraListTransitions.mockResolvedValue([])
-  runtimeMocks.jiraListPriorities.mockResolvedValue([])
-  runtimeMocks.jiraListAssignableUsers.mockResolvedValue([])
+  runtimeMocks.jiraGetIssueForTarget.mockImplementation(async () => jiraIssue(serverTitle))
+  runtimeMocks.jiraIssueCommentsForTarget.mockResolvedValue([])
+  runtimeMocks.jiraListTransitionsForTarget.mockResolvedValue([])
+  runtimeMocks.jiraListPrioritiesForTarget.mockResolvedValue([])
+  runtimeMocks.jiraListAssignableUsersForTarget.mockResolvedValue([])
 })
 
 afterEach(cleanup)
 
 describe('JiraIssueWorkspace optimistic edits', () => {
   it('keeps loaded and submitted comments while a title save patches the shared cache', async () => {
-    runtimeMocks.jiraUpdateIssue.mockReturnValue(deferred<{ ok: true }>().promise)
-    runtimeMocks.jiraIssueComments.mockResolvedValue([
+    runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(deferred<{ ok: true }>().promise)
+    runtimeMocks.jiraIssueCommentsForTarget.mockResolvedValue([
       { id: 'server', body: 'Existing comment', createdAt: '2026-09-01' }
     ])
-    runtimeMocks.jiraAddIssueComment.mockResolvedValue({ ok: true, id: 'added' })
+    runtimeMocks.jiraAddIssueCommentForTarget.mockResolvedValue({ ok: true, id: 'added' })
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
     fireEvent.change(screen.getByPlaceholderText('Add a Jira comment...'), {
@@ -138,7 +139,7 @@ describe('JiraIssueWorkspace optimistic edits', () => {
     await flushPromises()
     expect(screen.getByText('Existing comment')).toBeDefined()
     expect(screen.getByText('New comment')).toBeDefined()
-    expect(runtimeMocks.jiraIssueComments).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.jiraIssueCommentsForTarget).toHaveBeenCalledTimes(1)
   })
 
   it('reloads when the same issue moves to another source account on the same host', async () => {
@@ -146,9 +147,9 @@ describe('JiraIssueWorkspace optimistic edits', () => {
     await flushPromises()
     await act(async () => selectSource({ ...initialSource, accountLabel: 'other-account' }))
     await flushPromises()
-    expect(runtimeMocks.jiraGetIssue).toHaveBeenCalledTimes(2)
-    expect(runtimeMocks.jiraGetIssue).toHaveBeenLastCalledWith(
-      expect.objectContaining({ accountLabel: 'other-account' }),
+    expect(runtimeMocks.jiraGetIssueForTarget).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.jiraGetIssueForTarget).toHaveBeenLastCalledWith(
+      { kind: 'local' },
       'ENG-1',
       'site-1'
     )
@@ -156,27 +157,27 @@ describe('JiraIssueWorkspace optimistic edits', () => {
 
   it('keeps the new title on screen while the save is in flight', async () => {
     const update = deferred<{ ok: true }>()
-    runtimeMocks.jiraUpdateIssue.mockReturnValue(update.promise)
+    runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(update.promise)
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
 
     saveTitle('Old title', 'New title')
     await flushPromises()
 
-    expect(runtimeMocks.jiraUpdateIssue).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.jiraUpdateIssueForTarget).toHaveBeenCalledTimes(1)
     expect(screen.getByDisplayValue('New title')).toBeDefined()
-    expect(runtimeMocks.jiraGetIssue).toHaveBeenCalledTimes(1)
+    expect(runtimeMocks.jiraGetIssueForTarget).toHaveBeenCalledTimes(1)
 
     serverTitle = 'New title'
     await act(async () => update.resolve({ ok: true }))
     await flushPromises()
 
-    expect(runtimeMocks.jiraGetIssue).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.jiraGetIssueForTarget).toHaveBeenCalledTimes(2)
     expect(screen.getByDisplayValue('New title')).toBeDefined()
   })
 
   it('restores the previous title when the save fails', async () => {
-    runtimeMocks.jiraUpdateIssue.mockResolvedValue({ ok: false, error: 'Nope' })
+    runtimeMocks.jiraUpdateIssueForTarget.mockResolvedValue({ ok: false, error: 'Nope' })
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
 
@@ -194,8 +195,8 @@ describe('JiraIssueWorkspace optimistic edits', () => {
         priority: { id: '1', name: 'High' },
         assignee: { accountId: 'jane', displayName: 'Jane' }
       })
-      runtimeMocks.jiraGetIssue.mockReturnValue(initialLoad.promise)
-      runtimeMocks.jiraUpdateIssue.mockReturnValue(deferred<{ ok: true }>().promise)
+      runtimeMocks.jiraGetIssueForTarget.mockReturnValue(initialLoad.promise)
+      runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(deferred<{ ok: true }>().promise)
       render(<StoreBackedWorkspace initial={initial} />)
       await flushPromises()
       fireEvent.click(screen.getByRole('button', { name: field === 'priority' ? 'High' : 'Jane' }))
@@ -209,16 +210,16 @@ describe('JiraIssueWorkspace optimistic edits', () => {
       expect(
         screen.queryByRole('button', { name: field === 'priority' ? 'High' : 'Jane' })
       ).toBeNull()
-      expect(runtimeMocks.jiraGetIssue).toHaveBeenCalledTimes(1)
-      expect(runtimeMocks.jiraIssueComments).toHaveBeenCalledTimes(1)
+      expect(runtimeMocks.jiraGetIssueForTarget).toHaveBeenCalledTimes(1)
+      expect(runtimeMocks.jiraIssueCommentsForTarget).toHaveBeenCalledTimes(1)
     }
   )
 
   it('keeps fields hydrated during a failed title save', async () => {
     const initialLoad = deferred<JiraIssue>()
     const update = deferred<{ ok: false; error: string }>()
-    runtimeMocks.jiraGetIssue.mockReturnValue(initialLoad.promise)
-    runtimeMocks.jiraUpdateIssue.mockReturnValue(update.promise)
+    runtimeMocks.jiraGetIssueForTarget.mockReturnValue(initialLoad.promise)
+    runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(update.promise)
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
     saveTitle('Old title', 'New title')
@@ -232,11 +233,12 @@ describe('JiraIssueWorkspace optimistic edits', () => {
 
   it('allows editing a newly opened issue while an earlier save is still pending', async () => {
     const oldSave = deferred<{ ok: true }>()
-    runtimeMocks.jiraUpdateIssue
+    runtimeMocks.jiraUpdateIssueForTarget
       .mockReturnValueOnce(oldSave.promise)
       .mockResolvedValue({ ok: true })
-    runtimeMocks.jiraGetIssue.mockImplementation(async (_settings: unknown, key: string) =>
-      key === 'ENG-2' ? otherIssue : jiraIssue(serverTitle)
+    runtimeMocks.jiraGetIssueForTarget.mockImplementation(
+      async (_settings: unknown, key: string) =>
+        key === 'ENG-2' ? otherIssue : jiraIssue(serverTitle)
     )
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
@@ -245,7 +247,7 @@ describe('JiraIssueWorkspace optimistic edits', () => {
     await flushPromises()
     saveTitle('Other issue', 'Other updated')
     await flushPromises()
-    expect(runtimeMocks.jiraUpdateIssue).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.jiraUpdateIssueForTarget).toHaveBeenCalledTimes(2)
     await act(async () => oldSave.resolve({ ok: true }))
     await flushPromises()
     expect(screen.getByText('ENG-2')).toBeDefined()
@@ -261,10 +263,10 @@ describe('JiraIssueWorkspace optimistic edits', () => {
       categoryName: 'In Progress'
     }
     const done = { id: '4', name: 'Done', categoryKey: 'done', categoryName: 'Done' }
-    runtimeMocks.jiraListTransitions
+    runtimeMocks.jiraListTransitionsForTarget
       .mockResolvedValueOnce([{ id: '11', name: 'Start progress', to: inProgress }])
       .mockResolvedValue([{ id: '21', name: 'Finish', to: done }])
-    runtimeMocks.jiraUpdateIssue.mockResolvedValue({ ok: true })
+    runtimeMocks.jiraUpdateIssueForTarget.mockResolvedValue({ ok: true })
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
 
@@ -272,8 +274,8 @@ describe('JiraIssueWorkspace optimistic edits', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Start progress' }))
     await flushPromises()
 
-    expect(runtimeMocks.jiraUpdateIssue).toHaveBeenCalledWith(
-      initialSource,
+    expect(runtimeMocks.jiraUpdateIssueForTarget).toHaveBeenCalledWith(
+      { kind: 'local' },
       'ENG-1',
       { transitionId: '11' },
       'site-1'
@@ -285,8 +287,8 @@ describe('JiraIssueWorkspace optimistic edits', () => {
 
   it('still hydrates fields the user did not edit when the initial load lands late', async () => {
     const initialLoad = deferred<JiraIssue>()
-    runtimeMocks.jiraGetIssue.mockImplementationOnce(() => initialLoad.promise)
-    runtimeMocks.jiraUpdateIssue.mockReturnValue(deferred<{ ok: true }>().promise)
+    runtimeMocks.jiraGetIssueForTarget.mockImplementationOnce(() => initialLoad.promise)
+    runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(deferred<{ ok: true }>().promise)
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
 
@@ -306,9 +308,10 @@ describe('JiraIssueWorkspace optimistic edits', () => {
     // Why: the task page keeps one workspace instance across selections, so a
     // save that finishes after switching must not write the old issue back.
     const update = deferred<typeof outcome>()
-    runtimeMocks.jiraUpdateIssue.mockReturnValue(update.promise)
-    runtimeMocks.jiraGetIssue.mockImplementation(async (_settings: unknown, key: string) =>
-      key === 'ENG-2' ? otherIssue : jiraIssue(serverTitle)
+    runtimeMocks.jiraUpdateIssueForTarget.mockReturnValue(update.promise)
+    runtimeMocks.jiraGetIssueForTarget.mockImplementation(
+      async (_settings: unknown, key: string) =>
+        key === 'ENG-2' ? otherIssue : jiraIssue(serverTitle)
     )
     render(<StoreBackedWorkspace initial={jiraIssue('Old title')} />)
     await flushPromises()
@@ -329,10 +332,10 @@ describe('JiraIssueWorkspace optimistic edits', () => {
 
   it('does not let a slow initial load overwrite a title saved meanwhile', async () => {
     const initialLoad = deferred<JiraIssue>()
-    runtimeMocks.jiraGetIssue
+    runtimeMocks.jiraGetIssueForTarget
       .mockImplementationOnce(() => initialLoad.promise)
       .mockImplementation(async () => jiraIssue(serverTitle))
-    runtimeMocks.jiraUpdateIssue.mockImplementation(async () => {
+    runtimeMocks.jiraUpdateIssueForTarget.mockImplementation(async () => {
       serverTitle = 'New title'
       return { ok: true }
     })
