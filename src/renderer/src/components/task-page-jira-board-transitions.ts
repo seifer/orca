@@ -1,19 +1,21 @@
 import type { JiraIssue, JiraTransition } from '../../../shared/jira-types'
-import { jiraListTransitions, type RuntimeJiraSettings } from '@/runtime/runtime-jira-client'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
+import { jiraListTransitionsForTarget } from '@/runtime/runtime-jira-client'
+import { getRuntimeTargetHostId } from '@/runtime/runtime-client-target'
 import { createMetadataRequestStore, loadMetadata } from '@/hooks/metadata-request-cache'
 import type { TaskPageJiraBoardSection } from './task-page-jira-board-sections'
 
 const jiraIssueTransitionsStore = createMetadataRequestStore<JiraTransition[]>()
 
 export function loadTaskPageJiraIssueTransitions(
-  settings: RuntimeJiraSettings,
+  target: RuntimeClientTarget,
   runtimeScopeKey: string,
   issue: Pick<JiraIssue, 'key' | 'siteId' | 'status'>,
   force = false
 ): Promise<JiraTransition[]> {
-  // Why: the current status participates in the key so a moved issue naturally
-  // misses the stale entry instead of reusing transitions from its old status.
+  // Status changes invalidate transitions without borrowing another owner's cache.
   const cacheKey = [
+    encodeURIComponent(getRuntimeTargetHostId(target)),
     encodeURIComponent(runtimeScopeKey),
     encodeURIComponent(issue.siteId ?? ''),
     encodeURIComponent(issue.key),
@@ -24,7 +26,7 @@ export function loadTaskPageJiraIssueTransitions(
     jiraIssueTransitionsStore.failures.delete(cacheKey)
   }
   return loadMetadata(jiraIssueTransitionsStore, cacheKey, () =>
-    jiraListTransitions(settings, issue.key, issue.siteId)
+    jiraListTransitionsForTarget(target, issue.key, issue.siteId)
   )
 }
 

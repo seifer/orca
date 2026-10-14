@@ -1,23 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JiraIssue, JiraStatus, JiraTransition } from '../../../shared/jira-types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 
 const mocks = vi.hoisted(() => ({
-  jiraListTransitions: vi.fn()
+  jiraListTransitionsForTarget: vi.fn()
 }))
 
 vi.mock('@/runtime/runtime-jira-client', () => ({
-  jiraListTransitions: mocks.jiraListTransitions
+  jiraListTransitionsForTarget: mocks.jiraListTransitionsForTarget
 }))
 
 const { findJiraBoardSectionTransition, loadTaskPageJiraIssueTransitions } =
   await import('./task-page-jira-board-transitions')
-const settings: TaskSourceContext = {
-  kind: 'task-source',
-  provider: 'jira',
-  projectId: 'project',
-  hostId: 'local'
-}
+const target: RuntimeClientTarget = { kind: 'local' }
 
 function status(id: string, name: string): JiraStatus {
   return { id, name, categoryKey: 'indeterminate', categoryName: 'In Progress' }
@@ -118,40 +113,65 @@ describe('findJiraBoardSectionTransition', () => {
 
 describe('loadTaskPageJiraIssueTransitions', () => {
   beforeEach(() => {
-    mocks.jiraListTransitions.mockReset()
+    mocks.jiraListTransitionsForTarget.mockReset()
   })
 
   it('caches per issue status and refetches after the status changes', async () => {
     const inProgress = status('2', 'In Progress')
     const done = status('3', 'Done')
-    mocks.jiraListTransitions.mockResolvedValue([transition('t-done', done)])
+    mocks.jiraListTransitionsForTarget.mockResolvedValue([transition('t-done', done)])
 
-    await loadTaskPageJiraIssueTransitions(settings, 'scope', issue('STA-9', inProgress, 'site-a'))
-    await loadTaskPageJiraIssueTransitions(settings, 'scope', issue('STA-9', inProgress, 'site-a'))
-    expect(mocks.jiraListTransitions).toHaveBeenCalledTimes(1)
+    await loadTaskPageJiraIssueTransitions(target, 'scope', issue('STA-9', inProgress, 'site-a'))
+    await loadTaskPageJiraIssueTransitions(target, 'scope', issue('STA-9', inProgress, 'site-a'))
+    expect(mocks.jiraListTransitionsForTarget).toHaveBeenCalledTimes(1)
 
-    await loadTaskPageJiraIssueTransitions(settings, 'scope', issue('STA-9', done, 'site-a'))
-    expect(mocks.jiraListTransitions).toHaveBeenCalledTimes(2)
+    await loadTaskPageJiraIssueTransitions(target, 'scope', issue('STA-9', done, 'site-a'))
+    expect(mocks.jiraListTransitionsForTarget).toHaveBeenCalledTimes(2)
   })
 
   it('surfaces a failed transitions request and allows an explicit retry', async () => {
-    mocks.jiraListTransitions.mockRejectedValue(new Error('offline'))
+    mocks.jiraListTransitionsForTarget.mockRejectedValue(new Error('offline'))
     await expect(
       loadTaskPageJiraIssueTransitions(
-        settings,
+        target,
         'scope',
         issue('STA-500', status('2', 'In Progress'))
       )
     ).rejects.toThrow('offline')
-    mocks.jiraListTransitions.mockResolvedValue([])
+    mocks.jiraListTransitionsForTarget.mockResolvedValue([])
     await expect(
       loadTaskPageJiraIssueTransitions(
-        settings,
+        target,
         'scope',
         issue('STA-500', status('2', 'In Progress')),
         true
       )
     ).resolves.toEqual([])
-    expect(mocks.jiraListTransitions).toHaveBeenCalledTimes(2)
+    expect(mocks.jiraListTransitionsForTarget).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps concurrent local and remote metadata apart even with the same scope', async () => {
+    const remote: RuntimeClientTarget = { kind: 'environment', environmentId: 'owner' }
+    const currentIssue = issue('STA-OWNER', status('2', 'In Progress'), 'site-a')
+    const localAction = transition('local-done', status('3', 'Done'))
+    const remoteAction = transition('remote-done', status('3', 'Done'))
+    mocks.jiraListTransitionsForTarget.mockImplementation((owner: RuntimeClientTarget) =>
+      Promise.resolve(owner.kind === 'local' ? [localAction] : [remoteAction])
+    )
+    await expect(
+      Promise.all([
+        loadTaskPageJiraIssueTransitions(target, 'same-scope', currentIssue),
+        loadTaskPageJiraIssueTransitions(remote, 'same-scope', currentIssue)
+      ])
+    ).resolves.toEqual([[localAction], [remoteAction]])
+    await expect(
+      loadTaskPageJiraIssueTransitions(remote, 'same-scope', currentIssue)
+    ).resolves.toEqual([remoteAction])
+    expect(mocks.jiraListTransitionsForTarget).toHaveBeenCalledTimes(2)
+    expect(mocks.jiraListTransitionsForTarget).toHaveBeenCalledWith(
+      remote,
+      currentIssue.key,
+      currentIssue.siteId
+    )
   })
 })

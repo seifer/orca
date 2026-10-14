@@ -13,6 +13,7 @@ import { formatRelativeTime } from '../../task-page-source-context'
 import { getJiraStatusTone } from '@/components/task-page-jira-status-tone'
 import JiraIssueWorkspace from '@/components/JiraIssueWorkspace'
 import { TaskPageLinearContent } from '../linear/Content'
+import { ipcOrRuntimeTargetForHostId } from '@/runtime/runtime-client-target'
 export function TaskPageJiraContent({
   model
 }: {
@@ -50,8 +51,11 @@ export function TaskPageJiraContent({
     setJiraCurrentSprint,
     jiraTaskSourceContext,
     jiraTaskSourceScopeKey,
+    accountBackedTaskSourceHostId,
+    providerRuntimeContextKey,
     setJiraRefreshNonce
   } = model
+  const boardScopeKey = `${jiraTaskSourceScopeKey}:${providerRuntimeContextKey}`
   return taskSource === 'jira' ? (
     !jiraStatusReady ? (
       <div className="mt-4 flex items-center justify-center py-14">
@@ -159,12 +163,13 @@ export function TaskPageJiraContent({
 
           {jiraViewMode === 'board' ? (
             <TaskPageJiraBoardView
-              key={`${jiraTaskSourceScopeKey}:${selectedJiraSiteId}`}
+              key={`${accountBackedTaskSourceHostId}:${boardScopeKey}:${selectedJiraSiteId}`}
               issues={sortedJiraIssues}
               statusOrder={displayedJiraStatusOrder}
               selectedIssue={selectedJiraIssue}
               sourceContext={jiraTaskSourceContext}
-              scopeKey={jiraTaskSourceScopeKey}
+              target={ipcOrRuntimeTargetForHostId(accountBackedTaskSourceHostId)}
+              scopeKey={boardScopeKey}
               onOpenIssue={openJiraDetailPage}
               onStartWorkspace={handleUseJiraItem}
               showSiteContext={selectedJiraSiteId === 'all'}

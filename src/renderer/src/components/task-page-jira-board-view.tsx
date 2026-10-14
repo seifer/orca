@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
-import { defaultScopeSource } from '@/lib/default-creation-host'
+import { getEnvironmentRuntimeContextKey } from '@/lib/provider-runtime-context'
+import { runtimeTargetEnvironmentId } from '@/runtime/runtime-client-target'
 import { translate } from '@/i18n/i18n'
 import { classifyTransitionRequirements } from '../../../shared/jira-transition-fields'
 import type {
@@ -10,7 +11,7 @@ import type {
   JiraTransition
 } from '../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../shared/task-source-context'
-import type { RuntimeJiraSettings } from '@/runtime/runtime-jira-client'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
 import { TaskPageJiraBoard, jiraBoardIssueRefKey } from './task-page-jira-board'
 import type { TaskPageJiraBoardSection } from './task-page-jira-board-sections'
 import { JiraBoardMoveDialog, type JiraBoardMovePrompt } from './task-page-jira-board-move-dialog'
@@ -22,6 +23,7 @@ type Props = {
   statusOrder: JiraProjectStatusOrder | null
   selectedIssue: JiraIssue | null
   sourceContext: TaskSourceContext | null
+  target: RuntimeClientTarget | null
   scopeKey: string
   showSiteContext: boolean
   loading?: boolean
@@ -35,6 +37,7 @@ export function TaskPageJiraBoardView({
   statusOrder,
   selectedIssue,
   sourceContext,
+  target,
   scopeKey,
   showSiteContext,
   loading = false,
@@ -42,9 +45,7 @@ export function TaskPageJiraBoardView({
   onStartWorkspace,
   onRefresh
 }: Props): React.JSX.Element {
-  const settings = useAppStore((state) => state.settings)
   const patchJiraIssue = useAppStore((state) => state.patchJiraIssue)
-  const owner: RuntimeJiraSettings = sourceContext ?? defaultScopeSource(settings)
   const [prompt, setPrompt] = useState<JiraBoardMovePrompt | null>(null)
   const [pending, setPending] = useState(false)
   const lockedIssueRef = useRef<string | null>(null)
@@ -71,21 +72,38 @@ export function TaskPageJiraBoardView({
     transition: JiraTransition,
     updates: JiraIssueUpdate
   ): Promise<void> {
+    if (!target) {
+      return
+    }
+    const request = requestRef.current
+    const patchOptions = {
+      sourceContext,
+      siteId: issue.siteId,
+      ...(!sourceContext
+        ? { contextKey: getEnvironmentRuntimeContextKey(runtimeTargetEnvironmentId(target)) }
+        : {})
+    }
     setPending(true)
-    patchJiraIssue(issue.key, { status: transition.to }, { sourceContext, siteId: issue.siteId })
+    patchJiraIssue(issue.key, { status: transition.to }, patchOptions)
     try {
-      const { result, latest } = await applyJiraBoardMove(owner, issue, updates)
+      const { result, latest } = await applyJiraBoardMove(target, issue, updates)
       if (!result.ok) {
         throw new Error(result.error)
       }
       if (latest) {
-        patchJiraIssue(issue.key, latest, { sourceContext, siteId: issue.siteId })
+        patchJiraIssue(issue.key, latest, patchOptions)
+      }
+      if (requestRef.current !== request) {
+        return
       }
       lockedIssueRef.current = null
       setPrompt(null)
       onRefresh()
     } catch (error) {
-      patchJiraIssue(issue.key, { status: issue.status }, { sourceContext, siteId: issue.siteId })
+      patchJiraIssue(issue.key, { status: issue.status }, patchOptions)
+      if (requestRef.current !== request) {
+        return
+      }
       setPrompt((current) =>
         current
           ? {
@@ -96,7 +114,9 @@ export function TaskPageJiraBoardView({
           : null
       )
     } finally {
-      setPending(false)
+      if (requestRef.current === request) {
+        setPending(false)
+      }
     }
   }
 
@@ -112,7 +132,7 @@ export function TaskPageJiraBoardView({
     destination: TaskPageJiraBoardSection,
     force = false
   ): Promise<void> {
-    if (loading || lockedIssueRef.current) {
+    if (loading || !target || lockedIssueRef.current) {
       return
     }
     const request = ++requestRef.current
@@ -128,7 +148,7 @@ export function TaskPageJiraBoardView({
     })
     try {
       const transitions = await getJiraBoardMoveTransitions(
-        owner,
+        target,
         scopeKey,
         issue,
         destination,
@@ -184,7 +204,7 @@ export function TaskPageJiraBoardView({
         formatUpdatedAt={formatRelativeTime}
         updatingIssueKeys={
           new Set(
-            loading
+            loading || !target
               ? issues.map(jiraBoardIssueRefKey)
               : prompt
                 ? [jiraBoardIssueRefKey(prompt.issue)]

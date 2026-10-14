@@ -5,6 +5,9 @@ import {
   jiraCreateIssue,
   jiraUpdateIssue,
   jiraGetIssue,
+  jiraGetIssueForTarget,
+  jiraUpdateIssueForTarget,
+  jiraListTransitionsForTarget,
   jiraIssueComments,
   jiraListAssignableUsers,
   jiraListAssignableUsersForProject,
@@ -498,5 +501,64 @@ describe('required transition fields on mixed remote versions', () => {
     await expect(jiraUpdateIssue(settings, 'APP-1', { transitionId: '11' })).resolves.toEqual({
       ok: true
     })
+  })
+})
+
+describe('captured Jira board targets', () => {
+  it('routes metadata and updates to the captured owner', async () => {
+    runtimeCall.mockImplementation(async (args: { method: string }) =>
+      args.method === 'status.get'
+        ? createCompatibleRuntimeStatusResponse()
+        : { id: 'rpc-1', ok: true, result: args.method === 'jira.updateIssue' ? { ok: true } : [] }
+    )
+    const target = { kind: 'environment' as const, environmentId: 'board-owner' }
+    await jiraListTransitionsForTarget(target, 'APP-1', 'site-a')
+    await jiraUpdateIssueForTarget(target, 'APP-1', { transitionId: '11' }, 'site-a')
+    expect(runtimeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: 'board-owner',
+        method: 'jira.listTransitions',
+        params: { key: 'APP-1', siteId: 'site-a' }
+      })
+    )
+    expect(runtimeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: 'board-owner',
+        method: 'jira.updateIssue',
+        params: { key: 'APP-1', siteId: 'site-a', updates: { transitionId: '11' } }
+      })
+    )
+  })
+
+  it('preserves the text-only detail fallback for a host without streaming', async () => {
+    runtimeSubscribe.mockImplementation(
+      async (_args: RuntimeSubscribeArgs, callbacks: RuntimeSubscribeCallbacks) => {
+        callbacks.onResponse({
+          id: 'rpc-1',
+          ok: false,
+          error: { code: 'method_not_found', message: 'Streaming unavailable' }
+        })
+        return { unsubscribe: vi.fn(), sendBinary: vi.fn() }
+      }
+    )
+    runtimeCall.mockImplementation(async (args: { method: string }) =>
+      args.method === 'status.get'
+        ? createCompatibleRuntimeStatusResponse()
+        : { id: 'rpc-1', ok: true, result: { key: 'APP-1' } }
+    )
+    await expect(
+      jiraGetIssueForTarget(
+        { kind: 'environment', environmentId: 'board-owner' },
+        'APP-1',
+        'site-a'
+      )
+    ).resolves.toMatchObject({ key: 'APP-1' })
+    expect(runtimeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selector: 'board-owner',
+        method: 'jira.getIssue',
+        params: { key: 'APP-1', siteId: 'site-a' }
+      })
+    )
   })
 })

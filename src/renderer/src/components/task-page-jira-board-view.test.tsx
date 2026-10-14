@@ -3,6 +3,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JiraIssue, JiraTransition } from '../../../shared/jira-types'
 import type { TaskSourceContext } from '../../../shared/task-source-context'
+import type { RuntimeClientTarget } from '../../../shared/runtime-client-target'
+import {
+  bumpProviderRuntimeSessionGeneration,
+  getEnvironmentRuntimeContextKey
+} from '@/lib/provider-runtime-context'
 
 const mocks = vi.hoisted(() => ({
   transitions: vi.fn(),
@@ -12,9 +17,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/store', () => ({
-  useAppStore: (
-    selector: (state: { settings: null; patchJiraIssue: typeof mocks.patch }) => unknown
-  ) => selector({ settings: null, patchJiraIssue: mocks.patch })
+  useAppStore: (selector: (state: { patchJiraIssue: typeof mocks.patch }) => unknown) =>
+    selector({ patchJiraIssue: mocks.patch })
 }))
 vi.mock('./task-page-jira-board-move', () => ({
   getJiraBoardMoveTransitions: mocks.transitions,
@@ -28,8 +32,9 @@ const source: TaskSourceContext = {
   kind: 'task-source',
   provider: 'jira',
   projectId: 'project',
-  hostId: 'local'
+  hostId: 'runtime:board-owner'
 }
+const target: RuntimeClientTarget = { kind: 'environment', environmentId: 'board-owner' }
 const issue: JiraIssue = {
   id: '1',
   key: 'ABC-1',
@@ -49,14 +54,19 @@ const transition: JiraTransition = {
   to: { id: 'done', name: 'Done', categoryKey: 'done', categoryName: 'Done' }
 }
 
-function mount(loading = false): ReturnType<typeof render> {
+function mount(
+  loading = false,
+  owner: RuntimeClientTarget | null = target,
+  sourceContext: TaskSourceContext | null = source
+): ReturnType<typeof render> {
   return render(
     <TooltipProvider>
       <TaskPageJiraBoardView
         issues={[issue]}
         loading={loading}
         selectedIssue={null}
-        sourceContext={source}
+        sourceContext={sourceContext}
+        target={owner}
         scopeKey="host-a"
         showSiteContext={false}
         onOpenIssue={vi.fn()}
@@ -92,7 +102,7 @@ describe('Jira board moves', () => {
     mount()
     await move()
     await waitFor(() =>
-      expect(mocks.apply).toHaveBeenCalledWith(source, issue, { transitionId: 'done' })
+      expect(mocks.apply).toHaveBeenCalledWith(target, issue, { transitionId: 'done' })
     )
     expect(mocks.refresh).toHaveBeenCalledTimes(1)
     expect(mocks.patch).toHaveBeenCalledWith(
@@ -131,7 +141,7 @@ describe('Jira board moves', () => {
     }
     fireEvent.submit(form)
     await waitFor(() =>
-      expect(mocks.apply).toHaveBeenCalledWith(source, issue, {
+      expect(mocks.apply).toHaveBeenCalledWith(target, issue, {
         transitionId: 'done',
         transitionComment: 'Release checked.'
       })
@@ -149,7 +159,7 @@ describe('Jira board moves', () => {
     expect(mocks.apply).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Complete' }))
     await waitFor(() =>
-      expect(mocks.apply).toHaveBeenCalledWith(source, issue, { transitionId: 'done' })
+      expect(mocks.apply).toHaveBeenCalledWith(target, issue, { transitionId: 'done' })
     )
   })
 
@@ -243,4 +253,56 @@ describe('Jira board moves', () => {
     expect(screen.getByRole('button', { name: 'Move ABC-1' }).hasAttribute('disabled')).toBe(true)
     expect(mocks.transitions).not.toHaveBeenCalled()
   })
+
+  it('disables moves when the task page owner cannot be resolved', () => {
+    mount(false, null)
+    expect(screen.getByRole('button', { name: 'Move ABC-1' }).hasAttribute('disabled')).toBe(true)
+    expect(mocks.transitions).not.toHaveBeenCalled()
+    expect(mocks.apply).not.toHaveBeenCalled()
+  })
+
+  it('loads workflow actions from the captured owner', async () => {
+    mount()
+    await move()
+    expect(mocks.transitions.mock.calls[0][0]).toEqual(target)
+  })
+
+  it.each([
+    { settlement: 'success', sourceContext: null, kind: 'default' },
+    { settlement: 'failure', sourceContext: null, kind: 'default' },
+    { settlement: 'success', sourceContext: source, kind: 'explicit' },
+    { settlement: 'failure', sourceContext: source, kind: 'explicit' }
+  ])(
+    'settles a late $settlement in the $kind source after the board is removed',
+    async ({ settlement, sourceContext }) => {
+      const contextKey = getEnvironmentRuntimeContextKey('board-owner')
+      let settle: () => void = () => {}
+      mocks.apply.mockReturnValue(
+        new Promise((resolve, reject) => {
+          settle = () =>
+            settlement === 'success'
+              ? resolve({ result: { ok: true }, latest: { ...issue, status: transition.to } })
+              : reject(new Error('Old owner rejected the move'))
+        })
+      )
+      const view = mount(false, target, sourceContext)
+      await move()
+      await waitFor(() => expect(mocks.apply).toHaveBeenCalledTimes(1))
+      expect(mocks.patch).toHaveBeenCalledTimes(1)
+      view.unmount()
+      bumpProviderRuntimeSessionGeneration()
+      await act(async () => settle())
+      expect(mocks.patch).toHaveBeenCalledTimes(2)
+      expect(mocks.patch).toHaveBeenLastCalledWith(
+        issue.key,
+        settlement === 'success' ? { ...issue, status: transition.to } : { status: issue.status },
+        {
+          sourceContext,
+          siteId: issue.siteId,
+          ...(!sourceContext ? { contextKey } : {})
+        }
+      )
+      expect(mocks.refresh).not.toHaveBeenCalled()
+    }
+  )
 })

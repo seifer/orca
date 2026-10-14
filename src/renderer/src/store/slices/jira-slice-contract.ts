@@ -22,7 +22,11 @@ export type JiraCollectionReadOptions = JiraReadOptions & {
   filters?: JiraIssueListFilters
 }
 export type JiraSearchOptions = JiraCollectionReadOptions & { signal?: AbortSignal }
-export type JiraPatchOptions = { sourceContext?: TaskSourceContext | null; siteId?: string | null }
+export type JiraPatchOptions = {
+  sourceContext?: TaskSourceContext | null
+  siteId?: string | null
+  contextKey?: string
+}
 export type JiraIssueSummaryLookupOptions = { force?: boolean; signal?: AbortSignal }
 
 export type JiraSlice = {
