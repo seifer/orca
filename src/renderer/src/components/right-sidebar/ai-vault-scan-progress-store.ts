@@ -68,10 +68,11 @@ function loadKey(scanKey: string): void {
     .catch(() => undefined)
 }
 
-/** Only the local request's scanner entry can supply this panel's strip. */
+/** Live progress follows the request key; settled progress also needs the applied result's ID. */
 export function useAiVaultScanProgress(
   executionHostScope: ExecutionHostScope,
-  scanKey: string
+  scanKey: string,
+  appliedScanId: string | undefined
 ): AiVaultScanProgress | null {
   const local = executionHostScope === LOCAL_EXECUTION_HOST_ID
   const subscribe = useCallback(
@@ -85,10 +86,17 @@ export function useAiVaultScanProgress(
     },
     [local, scanKey]
   )
-  const snapshot = useCallback(
-    () => (local ? (progressByKey.get(scanKey) ?? null) : null),
-    [local, scanKey]
-  )
+  const snapshot = useCallback(() => {
+    const progress = local ? progressByKey.get(scanKey) : undefined
+    if (!progress) {
+      return null
+    }
+    return progress.stage === 'finding' ||
+      progress.stage === 'reading' ||
+      progress.scanId === appliedScanId
+      ? progress
+      : null
+  }, [appliedScanId, local, scanKey])
   return useSyncExternalStore(subscribe, snapshot)
 }
 

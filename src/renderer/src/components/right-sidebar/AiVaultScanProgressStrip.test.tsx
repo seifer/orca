@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AiVaultScanProgress } from '../../../../shared/ai-vault-scan-progress'
@@ -8,6 +8,11 @@ import { aiVaultLocalScanKey } from '../../../../shared/ai-vault-local-scan-key'
 import { AiVaultScanProgressStrip } from './AiVaultScanProgressStrip'
 import { AiVaultScanIssueBanners } from './AiVaultScanIssueBanners'
 import { reuseAiVaultListResult } from './ai-vault-session-identity'
+import {
+  cacheAiVaultSessionList,
+  readCachedAiVaultSessionList
+} from './ai-vault-session-list-request'
+import { resetAiVaultSessionResultCacheForTest } from './ai-vault-session-result-cache'
 import { currentAiVaultScanIssueResult } from './ai-vault-scan-issue-state'
 import {
   resetAiVaultScanProgressStoreForTests,
@@ -17,6 +22,7 @@ import {
 afterEach(() => {
   cleanup()
   resetAiVaultScanProgressStoreForTests()
+  resetAiVaultSessionResultCacheForTest()
   vi.unstubAllGlobals()
 })
 
@@ -68,9 +74,11 @@ it('keeps a narrower cached panel off the broader key while a late matching pane
       }
     }
   })
-  const local = renderHook(() => useAiVaultScanProgress('local', broader))
-  const narrowerPanel = renderHook(() => useAiVaultScanProgress('local', narrower))
-  const remote = renderHook(() => useAiVaultScanProgress('runtime:server-1', broader))
+  const local = renderHook(() => useAiVaultScanProgress('local', broader, cachedProgress.scanId))
+  const narrowerPanel = renderHook(() => useAiVaultScanProgress('local', narrower, undefined))
+  const remote = renderHook(() =>
+    useAiVaultScanProgress('runtime:server-1', broader, cachedProgress.scanId)
+  )
   await waitFor(() => expect(local.result.current).toBe(cachedProgress))
   act(() => push({ scanKey: broader, progress: cachedProgress }))
 
@@ -94,7 +102,7 @@ it('hides an old issue only while this panel is refreshing', () => {
   expect(currentAiVaultScanIssueResult(oldIssue)).toBe(oldIssue)
 })
 
-it('keeps a panel failure visible through another key’s scan and replaces only its own stopped timeout', () => {
+it('keeps each key’s failure and shows settled progress only with its applied result', () => {
   let push: (update: { scanKey: string; progress: AiVaultScanProgress | null }) => void = () =>
     undefined
   vi.stubGlobal('api', {
@@ -121,7 +129,7 @@ it('keeps a panel failure visible through another key’s scan and replaces only
     scanKey: 'scope-a'
   }
   function Panel({ scanKey, result }: { scanKey: string; result: AiVaultListResult | null }) {
-    const progress = useAiVaultScanProgress('local', scanKey)
+    const progress = useAiVaultScanProgress('local', scanKey, result?.scanId)
     return (
       <>
         {progress ? (
@@ -136,23 +144,96 @@ it('keeps a panel failure visible through another key’s scan and replaces only
   }
   const a = render(<Panel scanKey="scope-a" result={failed} />)
   const b = render(<Panel scanKey="scope-b" result={null} />)
+  const aView = within(a.container)
+  const bView = within(b.container)
   const other = { ...STOPPED, scanId: 'scan-b', scanKey: 'scope-b' }
   act(() => push({ scanKey: 'scope-b', progress: { ...other, stage: 'finding' } }))
-  expect(a.getByText('Local scan failed.')).toBeTruthy()
-  expect(b.getByText('Scanning', { exact: false })).toBeTruthy()
+  expect(aView.getByText('Local scan failed.')).toBeTruthy()
+  expect(bView.getByText('Scanning', { exact: false })).toBeTruthy()
   act(() => push({ scanKey: 'scope-b', progress: other }))
-  expect(a.getByText('Local scan failed.')).toBeTruthy()
+  expect(aView.getByText('Local scan failed.')).toBeTruthy()
   act(() => push({ scanKey: 'scope-a', progress: STOPPED }))
-  expect(a.getByText('Local scan failed.')).toBeTruthy()
+  expect(aView.getByText('Local scan failed.')).toBeTruthy()
   const timedOut = reuseAiVaultListResult(failed, {
     ...failed,
     scanId: 'scan-a',
     issues: [{ ...issue, message: 'Local scan timed out.' }]
   })
   a.rerender(<Panel scanKey="scope-a" result={timedOut} />)
-  expect(a.queryByText('Local scan timed out.')).toBeNull()
-  expect(a.queryByText('Local scan failed.')).toBeNull()
+  expect(aView.queryByText('Local scan timed out.')).toBeNull()
+  expect(aView.queryByText('Local scan failed.')).toBeNull()
   const nextFailure = reuseAiVaultListResult(timedOut, { ...failed, scanId: 'scan-a-next' })
   a.rerender(<Panel scanKey="scope-a" result={nextFailure} />)
-  expect(a.getByText('Local scan failed.')).toBeTruthy()
+  expect(aView.getByText('Local scan failed.')).toBeTruthy()
+  expect(aView.queryByText('Stopped after', { exact: false })).toBeNull()
+
+  const firstSuccess = { ...failed, scanId: 'scan-a-first', issues: [] }
+  act(() =>
+    push({
+      scanKey: 'scope-a',
+      progress: { ...STOPPED, scanId: 'scan-a-first', stage: 'finished' }
+    })
+  )
+  a.rerender(<Panel scanKey="scope-a" result={firstSuccess} />)
+  expect(aView.getByText('Scanned', { exact: false })).toBeTruthy()
+
+  const forcedStop = { ...STOPPED, scanId: 'scan-a-forced' }
+  act(() => push({ scanKey: 'scope-a', progress: { ...forcedStop, stage: 'finding' } }))
+  expect(aView.getByText('Scanning', { exact: false })).toBeTruthy()
+  act(() => push({ scanKey: 'scope-a', progress: forcedStop }))
+  a.rerender(<Panel scanKey="scope-a" result={{ ...failed, scanId: forcedStop.scanId }} />)
+  expect(aView.getByText('Stopped after', { exact: false })).toBeTruthy()
+  a.rerender(<Panel scanKey="scope-a" result={firstSuccess} />)
+  expect(aView.queryByText('Stopped after', { exact: false })).toBeNull()
+
+  const narrowRequest = {
+    scopePaths: ['/project'],
+    executionHostScope: 'local' as const,
+    sessionLimit: 250
+  }
+  const broadRequest = { ...narrowRequest, sessionLimit: 500 }
+  const narrowKey = aiVaultLocalScanKey({
+    scopePaths: narrowRequest.scopePaths,
+    includeAntigravityIdeSessions: true,
+    limit: 250
+  })
+  const broadKey = aiVaultLocalScanKey({
+    scopePaths: broadRequest.scopePaths,
+    includeAntigravityIdeSessions: true,
+    limit: 500
+  })
+  const narrowStop = { ...STOPPED, scanId: 'scan-narrow', scanKey: narrowKey }
+  act(() => push({ scanKey: narrowKey, progress: narrowStop }))
+  a.rerender(
+    <Panel
+      scanKey={narrowKey}
+      result={{ ...failed, scanId: narrowStop.scanId, scanKey: narrowKey }}
+    />
+  )
+  expect(aView.getByText('Stopped after', { exact: false })).toBeTruthy()
+
+  const broadSuccess = { ...firstSuccess, scanId: 'scan-broad', scanKey: broadKey }
+  act(() =>
+    push({
+      scanKey: broadKey,
+      progress: { ...STOPPED, scanId: broadSuccess.scanId, scanKey: broadKey, stage: 'finished' }
+    })
+  )
+  cacheAiVaultSessionList(broadRequest, broadSuccess, { replaceHostEntries: false })
+  b.rerender(<Panel scanKey={broadKey} result={broadSuccess} />)
+  expect(bView.getByText('Scanned', { exact: false })).toBeTruthy()
+  const reusedNarrow = readCachedAiVaultSessionList(narrowRequest)
+  expect(reusedNarrow?.scanId).toBe(broadSuccess.scanId)
+  a.rerender(<Panel scanKey={narrowKey} result={reusedNarrow} />)
+  expect(aView.queryByText('Stopped after', { exact: false })).toBeNull()
+  const narrowFinish = { ...narrowStop, scanId: 'scan-narrow-next', stage: 'finished' as const }
+  act(() => push({ scanKey: narrowKey, progress: narrowFinish }))
+  expect(aView.queryByText('Scanned', { exact: false })).toBeNull()
+  a.rerender(
+    <Panel
+      scanKey={narrowKey}
+      result={{ ...firstSuccess, scanId: narrowFinish.scanId, scanKey: narrowKey }}
+    />
+  )
+  expect(aView.getByText('Scanned', { exact: false })).toBeTruthy()
 })

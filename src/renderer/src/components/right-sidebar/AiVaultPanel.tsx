@@ -153,7 +153,11 @@ export default function AiVaultPanel(): React.JSX.Element {
     limit: sessionLimit === 'unlimited' ? undefined : sessionLimit,
     unlimited: sessionLimit === 'unlimited'
   })
-  const scanProgress = useAiVaultScanProgress(executionHostScope, requestedScanKey)
+  const scanProgress = useAiVaultScanProgress(
+    executionHostScope,
+    requestedScanKey,
+    scanResult?.scanId
+  )
   const stripProgress = searching ? null : scanProgress
   // Deliberately blind to the active repo/worktree: rebuilding these session
   // maps on every worktree switch is what made switching visibly slow (#10841 era).
