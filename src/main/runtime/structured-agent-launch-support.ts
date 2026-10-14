@@ -10,6 +10,9 @@ import {
 } from '../native-chat/structured-agent-session-create-support'
 import { structuredAgentRuntimeRegistration } from './structured-agent-runtime-registrations'
 import { resolveHostAgentBaseEnvironment } from './structured-agent-shell-environment'
+import type { AgentSessionAccountHome } from '../../shared/agent-session-account-home'
+import type { StructuredAgentCommandSettings } from '../native-chat/structured-agent-command-resolution'
+import { getProfileUserDataPath } from '../orca-profiles/profile-storage-paths'
 
 type LaunchEnvironmentSettings = Pick<
   GlobalSettings,
@@ -36,12 +39,42 @@ export async function structuredAgentSupportsLaunch(
     return true
   }
   const settings = runtime.requireStore().getSettings()
-  const env = {
+  const env = await hostLaunchEnvironment(agent, settings)
+  const cwd = (await runtime.resolveRuntimeFileTarget(worktreeSelector)).worktree.path
+  return supportsLaunch({ cwd, env, commandSettings: settings })
+}
+
+/** The shared base with the user's overlay for `agent`: what its launches start from here. */
+async function hostLaunchEnvironment(
+  agent: string,
+  settings: LaunchEnvironmentSettings
+): Promise<Record<string, string>> {
+  return {
     ...(await resolveHostAgentBaseEnvironment(settings)),
     ...(isTuiAgent(agent) ? resolveTuiAgentLaunchEnv(agent, settings.agentDefaultEnv) : {})
   }
-  const cwd = (await runtime.resolveRuntimeFileTarget(worktreeSelector)).worktree.path
-  return supportsLaunch({ cwd, env, commandSettings: settings })
+}
+
+/** What a chat start of `agent` on this host launches from, for a child that serves no chat. */
+export async function structuredAgentHostLaunchSources(
+  agent: StructuredAgentId,
+  runtime: Pick<LaunchSupportRuntime, 'requireStore'> & {
+    resolveStructuredAgentAccountHome(agent: StructuredAgentId): Promise<AgentSessionAccountHome>
+  }
+): Promise<{
+  accountHome: AgentSessionAccountHome
+  env: Record<string, string>
+  commandSettings: StructuredAgentCommandSettings
+  dataDirectory: string
+}> {
+  const settings = runtime.requireStore().getSettings()
+  return {
+    accountHome: await runtime.resolveStructuredAgentAccountHome(agent),
+    env: await hostLaunchEnvironment(agent, settings),
+    commandSettings: settings,
+    // The chat host's own state root (ensureStructuredAgentSessionHost).
+    dataDirectory: getProfileUserDataPath()
+  }
 }
 
 /** `agentSession.createSupport` on this host: every refusal it can know before spawning. The
