@@ -22,6 +22,7 @@ import { isRuntimeProviderSearchQueryWithinLimit } from './runtime-provider-sear
 import { readRuntimeJiraPayload } from './runtime-jira-payload-stream'
 import { getJiraRuntimeTarget, type RuntimeJiraSettings } from './runtime-jira-target'
 import { parseJiraConnectionStatus } from './runtime-jira-connection-status'
+import { jiraListProjectsForTarget, jiraStatusForTarget } from './runtime-jira-project-client'
 
 export { jiraLookupIssueSummary, jiraReadStatus } from './runtime-jira-summary-client'
 export {
@@ -54,12 +55,7 @@ async function readRemoteJiraPayload<TResult>(
 }
 
 export async function jiraStatus(settings: RuntimeJiraSettings): Promise<JiraConnectionStatus> {
-  const target = getJiraRuntimeTarget(settings)
-  return parseJiraConnectionStatus(
-    target.kind === 'environment'
-      ? await callRuntimeRpc<unknown>(target, 'jira.status', undefined, { timeoutMs: 15_000 })
-      : await window.api.jira.status()
-  )
+  return jiraStatusForTarget(getJiraRuntimeTarget(settings))
 }
 
 export async function jiraConnect(
@@ -208,12 +204,7 @@ export async function jiraListProjects(
   settings: RuntimeJiraSettings,
   siteId?: JiraSiteSelection | null
 ): Promise<JiraProject[]> {
-  const target = getJiraRuntimeTarget(settings)
-  return target.kind === 'environment'
-    ? callRuntimeRpc<JiraProject[]>(target, 'jira.listProjects', siteId ? { siteId } : undefined, {
-        timeoutMs: 30_000
-      })
-    : window.api.jira.listProjects(siteId ? { siteId } : undefined)
+  return jiraListProjectsForTarget(getJiraRuntimeTarget(settings), siteId)
 }
 
 export async function jiraListIssueTypes(
