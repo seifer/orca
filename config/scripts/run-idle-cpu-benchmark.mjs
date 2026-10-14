@@ -481,9 +481,15 @@ async function main() {
       )
     )
   } finally {
-    const launchedProcesses = descendantsOf(readProcessRows(), rootPid).filter(
-      (proc) => proc.pid !== rootPid
-    )
+    let launchedProcesses = []
+    try {
+      launchedProcesses = descendantsOf(readProcessRows(), rootPid).filter(
+        (proc) => proc.pid !== rootPid
+      )
+    } catch (error) {
+      // A failed or timed-out read must not skip the app close and fixture cleanup below.
+      console.error('idle CPU benchmark: could not list launched processes', error)
+    }
     await app.close().catch(() => undefined)
     await sleep(250)
     terminateProcesses(launchedProcesses)
